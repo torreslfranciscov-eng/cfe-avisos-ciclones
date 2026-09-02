@@ -1,8 +1,8 @@
 """
 app.py
 Servicio Web / API para despliegue en la nube (Render, Railway, GCP, etc.) o local.
-Incluye programador automático en segundo plano (cada 15 min) para monitorear SMN
-y generar reportes Word (.docx) de CFE para Océano Pacífico y Atlántico.
+Monitoreo automático de SMN (cada 15 min), generación de reportes Word (.docx) de CFE
+y envío automático por correo electrónico con archivo adjunto.
 """
 
 import os
@@ -13,6 +13,7 @@ import threading
 from flask import Flask, jsonify, request, send_from_directory, render_template_string
 from smn_scraper import get_active_cyclones, fetch_cyclone_data
 from report_generator import generate_word_report
+from email_sender import send_cyclone_email
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
@@ -45,6 +46,7 @@ def save_processed_state(state):
 def run_cycle_check(force=False):
     """
     Ejecuta el ciclo de verificación contra SMN para Pacífico y Atlántico.
+    Genera el Word y envía el correo electrónico a los destinatarios configurados.
     """
     state = load_processed_state()
     cyclones = get_active_cyclones()
@@ -67,17 +69,22 @@ def run_cycle_check(force=False):
             doc_path = generate_word_report(data, output_dir=REPORTS_DIR)
             filename = os.path.basename(doc_path)
 
+            # Envío automático por correo con el Word adjunto
+            email_sent = send_cyclone_email(data, doc_path)
+
             state[state_key] = {
                 "label": label,
                 "cuenca": cuenca,
                 "filename": filename,
+                "email_sent": email_sent,
                 "timestamp": str(os.path.getmtime(doc_path))
             }
             generated.append({
                 "aviso_id": aviso_id,
                 "cuenca": cuenca,
                 "label": label,
-                "filename": filename
+                "filename": filename,
+                "email_sent": email_sent
             })
 
     save_processed_state(state)
@@ -97,7 +104,6 @@ def background_monitor_worker():
         time.sleep(POLL_INTERVAL_MINUTES * 60)
 
 
-# Iniciar el hilo de fondo al arrancar
 monitor_thread = threading.Thread(target=background_monitor_worker, daemon=True)
 monitor_thread.start()
 
@@ -108,6 +114,7 @@ def index():
     state = load_processed_state()
     files = [f for f in os.listdir(REPORTS_DIR) if f.endswith((".docx", ".docm"))]
     files.sort(key=lambda x: os.path.getmtime(os.path.join(REPORTS_DIR, x)), reverse=True)
+    smtp_configured = bool(os.getenv("SMTP_USER") and os.getenv("EMAIL_TO"))
 
     html = """
     <!DOCTYPE html>
@@ -128,7 +135,7 @@ def index():
         <div class="container">
             <div class="hero-card shadow">
                 <h2>🌀 CFE Hidrometeorología &mdash; Avisos de Ciclón Tropical</h2>
-                <p class="lead mb-0">Monitoreo 24/7 y generación automática de reportes Word (.docx) de <strong>CONAGUA / SMN</strong></p>
+                <p class="lead mb-0">Monitoreo 24/7, generación de reportes Word (.docx) y <strong>notificaciones por correo electrónico</strong></p>
             </div>
 
             <div class="row mb-4">
@@ -136,8 +143,8 @@ def index():
                     <div class="card shadow-sm h-100">
                         <div class="card-body">
                             <h5 class="card-title">Acciones de Monitoreo</h5>
-                            <p class="card-text">El sistema monitorea automáticamente cada 15 minutos. También puedes forzar la verificación manual:</p>
-                            <a href="/check?force=true" class="btn btn-success me-2">⚡ Forzar Generación Ahora</a>
+                            <p class="card-text">Revisión automática cada 15 minutos. También puedes forzar la verificación y reenvío de correos:</p>
+                            <a href="/check?force=true" class="btn btn-success me-2">⚡ Forzar Generación y Correo</a>
                             <a href="/check" class="btn btn-outline-primary">🔍 Verificar Nuevos</a>
                         </div>
                     </div>
@@ -145,9 +152,14 @@ def index():
                 <div class="col-md-6">
                     <div class="card shadow-sm h-100">
                         <div class="card-body">
-                            <h5 class="card-title">Estado del Monitor Automático</h5>
-                            <p class="card-text text-muted mb-1">Intervalo de revisión: <strong>Cada 15 minutos</strong></p>
-                            <span class="badge bg-success">🟢 Monitor Activo en Segundo Plano</span>
+                            <h5 class="card-title">Estado del Envío de Correos</h5>
+                            {% if smtp_configured %}
+                            <p class="card-text mb-1"><span class="badge bg-success">🟢 Correos Activos</span></p>
+                            <p class="text-muted small mb-0">Enviando a: <code>{{ os.getenv('EMAIL_TO') }}</code></p>
+                            {% else %}
+                            <p class="card-text mb-1"><span class="badge bg-warning text-dark">🟡 Correos no configurados</span></p>
+                            <p class="text-muted small mb-0">Agrega las variables <code>SMTP_USER</code>, <code>SMTP_PASSWORD</code> y <code>EMAIL_TO</code> en Render Environment.</p>
+                            {% endif %}
                         </div>
                     </div>
                 </div>
@@ -195,7 +207,7 @@ def index():
     </body>
     </html>
     """
-    return render_template_string(html, files=files, state=state)
+    return render_template_string(html, files=files, state=state, smtp_configured=smtp_configured, os=os)
 
 
 @app.route("/check", methods=["GET", "POST"])
