@@ -12,22 +12,22 @@ from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
 
-SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
-SMTP_USER = os.getenv("SMTP_USER", "")
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
-EMAIL_TO = os.getenv("EMAIL_TO", "")  # Lista separada por comas ej: "alguien@cfe.gob.mx, jefe@cfe.gob.mx"
-
 
 def send_cyclone_email(cyclone_data, docx_path):
     """
     Envía por correo electrónico la notificación del aviso junto con el archivo Word adjunto.
     """
-    if not SMTP_USER or not SMTP_PASSWORD or not EMAIL_TO:
-        logging.info("[EMAIL] Envío por correo deshabilitado (faltan configurar variables SMTP_USER, SMTP_PASSWORD, EMAIL_TO).")
+    smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
+    smtp_port = int(os.getenv("SMTP_PORT", "587"))
+    smtp_user = os.getenv("SMTP_USER", "").strip()
+    smtp_password = os.getenv("SMTP_PASSWORD", "").replace(" ", "").strip()
+    email_to_raw = os.getenv("EMAIL_TO", "").strip()
+
+    if not smtp_user or not smtp_password or not email_to_raw:
+        logging.info("[EMAIL] Envío por correo no configurado (falta SMTP_USER, SMTP_PASSWORD o EMAIL_TO).")
         return False
 
-    recipients = [e.strip() for e in EMAIL_TO.split(",") if e.strip()]
+    recipients = [e.strip() for e in email_to_raw.split(",") if e.strip()]
     if not recipients:
         return False
 
@@ -41,7 +41,6 @@ def send_cyclone_email(cyclone_data, docx_path):
 
     subject = f"🌀 Aviso Meteorológico CFE: {sistema} ({cuenca})"
 
-    # Cuerpo del correo en HTML institucional
     html_body = f"""
     <!DOCTYPE html>
     <html>
@@ -103,7 +102,7 @@ def send_cyclone_email(cyclone_data, docx_path):
     """
 
     msg = MIMEMultipart()
-    msg["From"] = f"CFE Hidrometeorología <{SMTP_USER}>"
+    msg["From"] = f"CFE Hidrometeorología <{smtp_user}>"
     msg["To"] = ", ".join(recipients)
     msg["Subject"] = subject
     msg.attach(MIMEText(html_body, "html", "utf-8"))
@@ -121,10 +120,14 @@ def send_cyclone_email(cyclone_data, docx_path):
             logging.error(f"[EMAIL] Error al adjuntar archivo Word: {e}")
 
     try:
-        server = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20)
-        server.starttls()
-        server.login(SMTP_USER, SMTP_PASSWORD)
-        server.sendmail(SMTP_USER, recipients, msg.as_string())
+        if smtp_port == 465:
+            server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=20)
+        else:
+            server = smtplib.SMTP(smtp_host, smtp_port, timeout=20)
+            server.starttls()
+            
+        server.login(smtp_user, smtp_password)
+        server.sendmail(smtp_user, recipients, msg.as_string())
         server.quit()
         logging.info(f"[EMAIL] Notificación enviada con éxito a: {', '.join(recipients)}")
         return True
