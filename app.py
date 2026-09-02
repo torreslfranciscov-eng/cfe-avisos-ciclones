@@ -253,13 +253,27 @@ def index():
 
 
 @app.route("/qr")
+@app.route("/qr/")
 def proxy_qr():
     """Proxy transparente al servidor de WhatsApp para mostrar la pantalla del QR."""
+    openwa_url = os.getenv("OPENWA_SERVER_URL", "http://localhost:8085").rstrip("/")
     try:
-        r = http_requests.get(f"{OPENWA_SERVER_URL}/qr", timeout=10)
+        r = http_requests.get(f"{openwa_url}/qr", timeout=10)
         return Response(r.content, status=r.status_code, content_type=r.headers.get("content-type", "text/html"))
     except Exception as e:
-        return f"<h3>Servidor de WhatsApp iniciando... por favor recarga en 5 segundos.</h3><p>{e}</p>", 503
+        return f"""
+        <!DOCTYPE html>
+        <html>
+        <head><title>Iniciando WhatsApp...</title><meta http-equiv="refresh" content="5"></head>
+        <body style="font-family: 'Segoe UI', sans-serif; text-align: center; padding: 50px; background: #f0f2f5;">
+            <div style="background: white; border-radius: 12px; padding: 30px; display: inline-block; box-shadow: 0 4px 12px rgba(0,0,0,0.1); max-width: 400px;">
+                <h3 style="color: #1E5B4F;">Iniciando servidor de WhatsApp...</h3>
+                <p style="color: #666;">Por favor espera unos segundos mientras carga el código QR.</p>
+                <p style="font-size: 12px; color: #999;">Esta página se recarga automáticamente cada 5 segundos.</p>
+            </div>
+        </body>
+        </html>
+        """, 200
 
 
 @app.route("/check", methods=["GET", "POST"])
