@@ -38,7 +38,8 @@ app.get('/qr', (req, res) => {
             <head><title>WhatsApp CFE Conectado</title></head>
             <body style="font-family: sans-serif; text-align: center; padding: 50px; background: #eef7f4;">
                 <h1 style="color: #1E5B4F;">✅ WhatsApp Conectado con Éxito</h1>
-                <p>El cliente de WhatsApp de CFE está listo para enviar avisos meteorológicos.</p>
+                <p>El cliente de WhatsApp de CFE está listo para enviar avisos meteorológicos a grupos y números.</p>
+                <p><a href="/groups" style="color: #1E5B4F; font-weight: bold;">Ver grupos disponibles</a></p>
             </body>
             </html>
         `);
@@ -81,6 +82,50 @@ app.get('/qr', (req, res) => {
     `);
 });
 
+// Endpoint para listar todos los grupos en los que participa la cuenta
+app.get('/groups', async (req, res) => {
+    if (!waSock || clientStatus !== 'READY') {
+        return res.status(503).json({ ok: false, error: 'WhatsApp client not ready' });
+    }
+    try {
+        const groupsObj = await waSock.groupFetchAllParticipating();
+        const groupsList = Object.values(groupsObj).map(g => ({
+            id: g.id,
+            name: g.subject,
+            participantsCount: g.participants?.length || 0
+        }));
+        res.json({ ok: true, groups: groupsList });
+    } catch (err) {
+        res.status(500).json({ ok: false, error: err.toString() });
+    }
+});
+
+// Función auxiliar para resolver nombre de grupo a JID
+async function resolveJid(to) {
+    if (to.includes('@g.us') || to.includes('@s.whatsapp.net') || to.includes('@c.us')) {
+        return to;
+    }
+    // Si contiene solo números, es teléfono
+    if (/^\+?\d+$/.test(to.replace(/[\s-]/g, ''))) {
+        const cleanNum = to.replace(/[\s-+]/g, '');
+        return `${cleanNum}@s.whatsapp.net`;
+    }
+    // Si es texto (nombre de grupo ej: "Avisos Ciclones"), buscar en los grupos
+    try {
+        const groups = await waSock.groupFetchAllParticipating();
+        const normalizedTarget = to.trim().toLowerCase();
+        for (const g of Object.values(groups)) {
+            if (g.subject.trim().toLowerCase() === normalizedTarget || g.subject.trim().toLowerCase().includes(normalizedTarget)) {
+                console.log(`[WHATSAPP] Grupo encontrado: '${g.subject}' -> JID: ${g.id}`);
+                return g.id;
+            }
+        }
+    } catch (e) {
+        console.error('Error buscando grupos:', e);
+    }
+    return to;
+}
+
 // Endpoint para enviar aviso completo (fotos satélite/cono + Word adjunto)
 app.post('/sendCycloneNotice', async (req, res) => {
     if (!waSock || clientStatus !== 'READY') {
@@ -88,11 +133,7 @@ app.post('/sendCycloneNotice', async (req, res) => {
     }
     const { to, caption, satPath, trayPath, docxPath } = req.body;
     try {
-        let jid = to;
-        if (!jid.includes('@')) {
-            jid = `${jid}@s.whatsapp.net`;
-        }
-
+        const jid = await resolveJid(to);
         const results = [];
 
         // 1. Enviar imagen satelital con caption
@@ -131,7 +172,7 @@ app.post('/sendCycloneNotice', async (req, res) => {
             results.push({ type: 'doc', resDoc });
         }
 
-        res.json({ ok: true, results });
+        res.json({ ok: true, recipient: jid, results });
     } catch (err) {
         console.error('Error in sendCycloneNotice:', err);
         res.status(500).json({ ok: false, error: err.toString() });
@@ -160,7 +201,7 @@ async function startBaileys() {
         if (qr) {
             clientStatus = 'SCAN_QR';
             latestQrDataUrl = await QRCode.toDataURL(qr);
-            console.log('📌 Código QR generado. Abre http://localhost:' + PORT + '/qr para escanearlo con WhatsApp.');
+            console.log('📌 Código QR generado. Abre http://localhost:' + PORT + '/qr');
             qrcodeTerminal.generate(qr, { small: true });
         }
 
@@ -181,6 +222,5 @@ async function startBaileys() {
 
 app.listen(PORT, () => {
     console.log(`🚀 Servidor WhatsApp CFE escuchando en http://localhost:${PORT}`);
-    console.log(`👉 Abre en tu navegador para escanear el QR: http://localhost:${PORT}/qr`);
     startBaileys();
 });

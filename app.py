@@ -276,6 +276,18 @@ def proxy_qr():
         """, 200
 
 
+@app.route("/groups")
+@app.route("/groups/")
+def proxy_groups():
+    """Proxy para listar los grupos de WhatsApp disponibles."""
+    openwa_url = os.getenv("OPENWA_SERVER_URL", "http://localhost:8085").rstrip("/")
+    try:
+        r = http_requests.get(f"{openwa_url}/groups", timeout=10)
+        return Response(r.content, status=r.status_code, content_type="application/json")
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @app.route("/check", methods=["GET", "POST"])
 def check():
     force = request.args.get("force", "false").lower() == "true"
