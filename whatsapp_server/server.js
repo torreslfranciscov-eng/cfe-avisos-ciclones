@@ -21,11 +21,13 @@ const PORT = process.env.WA_PORT || 8085;
 let waSock = null;
 let latestQrDataUrl = null;
 let clientStatus = 'INITIALIZING';
+let webhookUrl = process.env.WHATSAPP_WEBHOOK_URL || 'https://centinela.runasp.net/api/whatsapp/webhook';
 
 app.get('/status', (req, res) => {
     res.json({
         status: clientStatus,
         isReady: clientStatus === 'READY',
+        webhookUrl: webhookUrl,
         port: PORT
     });
 });
@@ -39,6 +41,7 @@ app.get('/qr', (req, res) => {
             <body style="font-family: sans-serif; text-align: center; padding: 50px; background: #eef7f4;">
                 <h1 style="color: #1E5B4F;">✅ WhatsApp Conectado con Éxito</h1>
                 <p>El cliente de WhatsApp de CFE está listo para enviar avisos meteorológicos a grupos y números.</p>
+                <p>Webhook activo hacia: <code>${webhookUrl}</code></p>
                 <p><a href="/groups" style="color: #1E5B4F; font-weight: bold;">Ver grupos disponibles</a></p>
             </body>
             </html>
@@ -82,6 +85,17 @@ app.get('/qr', (req, res) => {
     `);
 });
 
+// Endpoint para configurar o actualizar la URL del Webhook
+app.post('/setWebhook', (req, res) => {
+    const { url } = req.body;
+    if (url) {
+        webhookUrl = url.trim();
+        console.log(`[WHATSAPP] Webhook actualizado a: ${webhookUrl}`);
+        return res.json({ ok: true, webhookUrl });
+    }
+    res.status(400).json({ ok: false, error: 'URL requerida' });
+});
+
 // Endpoint para listar todos los grupos en los que participa la cuenta
 app.get('/groups', async (req, res) => {
     if (!waSock || clientStatus !== 'READY') {
@@ -105,12 +119,10 @@ async function resolveJid(to) {
     if (to.includes('@g.us') || to.includes('@s.whatsapp.net') || to.includes('@c.us')) {
         return to;
     }
-    // Si contiene solo números, es teléfono
     if (/^\+?\d+$/.test(to.replace(/[\s-]/g, ''))) {
         const cleanNum = to.replace(/[\s-+]/g, '');
         return `${cleanNum}@s.whatsapp.net`;
     }
-    // Si es texto (nombre de grupo ej: "Avisos Ciclones"), buscar en los grupos
     try {
         const groups = await waSock.groupFetchAllParticipating();
         const normalizedTarget = to.trim().toLowerCase();
@@ -195,6 +207,47 @@ async function startBaileys() {
 
     waSock.ev.on('creds.update', saveCreds);
 
+    // ESCUCHAR MENSAJES ENTRANTES Y REENVIARLOS AL WEBHOOK
+    waSock.ev.on('messages.upsert', async (m) => {
+        if (!webhookUrl || m.type !== 'notify') return;
+
+        for (const msg of m.messages) {
+            // Ignorar mensajes enviados por el propio bot
+            if (msg.key.fromMe) continue;
+
+            const from = msg.key.remoteJid;
+            const isGroup = from.endsWith('@g.us');
+            const senderNumber = (msg.key.participant || from).split('@')[0];
+            const text = msg.message?.conversation || 
+                         msg.message?.extendedTextMessage?.text || 
+                         msg.message?.imageMessage?.caption || 
+                         '';
+
+            const payload = {
+                from: from,
+                sender: senderNumber,
+                senderName: msg.pushName || 'Usuario',
+                isGroup: isGroup,
+                messageId: msg.key.id,
+                text: text,
+                timestamp: msg.messageTimestamp,
+                messageType: Object.keys(msg.message || {})[0] || 'unknown',
+                raw: msg
+            };
+
+            try {
+                const response = await fetch(webhookUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                console.log(`[WHATSAPP WEBHOOK] Mensaje reenviado a ${webhookUrl} -> Status: ${response.status}`);
+            } catch (err) {
+                console.error(`[WHATSAPP WEBHOOK] Error al enviar a ${webhookUrl}:`, err.message);
+            }
+        }
+    });
+
     waSock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
 
@@ -222,5 +275,6 @@ async function startBaileys() {
 
 app.listen(PORT, () => {
     console.log(`🚀 Servidor WhatsApp CFE escuchando en http://localhost:${PORT}`);
+    console.log(`🌐 Webhook destino configurado: ${webhookUrl}`);
     startBaileys();
 });
