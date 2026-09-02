@@ -2,7 +2,7 @@
 app.py
 Servicio Web / API para monitoreo de avisos de ciclones tropicales de CFE (CONAGUA/SMN).
 Monitoreo automático cada 15 min, generación de reportes Word (.docx),
-notificaciones por Correo Electrónico, Telegram y WhatsApp.
+notificaciones por Correo Electrónico, Telegram y WhatsApp, y alertas de desconexión.
 """
 
 import os
@@ -14,7 +14,7 @@ import requests as http_requests
 from flask import Flask, jsonify, request, send_from_directory, render_template_string, Response
 from smn_scraper import get_active_cyclones, fetch_cyclone_data
 from report_generator import generate_word_report
-from email_sender import send_cyclone_email
+from email_sender import send_cyclone_email, send_whatsapp_disconnected_alert
 from telegram_sender import send_cyclone_telegram
 from whatsapp_sender import send_cyclone_whatsapp
 
@@ -28,6 +28,7 @@ POLL_INTERVAL_MINUTES = int(os.getenv("POLL_INTERVAL_MINUTES", "15"))
 OPENWA_SERVER_URL = os.getenv("OPENWA_SERVER_URL", "http://localhost:8085")
 
 os.makedirs(REPORTS_DIR, exist_ok=True)
+last_wa_alert_time = 0
 
 
 def load_processed_state():
@@ -47,6 +48,27 @@ def save_processed_state(state):
         json.dump(state, f, ensure_ascii=False, indent=2)
 
 
+def check_whatsapp_health():
+    """Verifica si WhatsApp sigue conectado. Si se desvinculó, envía correo de alerta."""
+    global last_wa_alert_time
+    # Solo alertar si WhatsApp está configurado para usarse
+    if not os.getenv("WHATSAPP_TO"):
+        return
+        
+    try:
+        r = http_requests.get(f"{OPENWA_SERVER_URL}/status", timeout=5)
+        data = r.json()
+        if not data.get("isReady"):
+            now = time.time()
+            # Enviar máximo una alerta cada 4 horas para no saturar
+            if now - last_wa_alert_time > 14400:
+                logging.warning("[WHATSAPP] Sesión desvinculada detectada. Enviando correo de alerta...")
+                send_whatsapp_disconnected_alert()
+                last_wa_alert_time = now
+    except Exception as e:
+        logging.debug(f"No se pudo consultar estado de WhatsApp: {e}")
+
+
 def run_cycle_check(force=False):
     """
     Ejecuta el ciclo de verificación contra SMN para Pacífico y Atlántico.
@@ -55,6 +77,9 @@ def run_cycle_check(force=False):
     state = load_processed_state()
     cyclones = get_active_cyclones()
     generated = []
+
+    # Verificar estado de WhatsApp
+    check_whatsapp_health()
 
     for c in cyclones:
         aviso_id = str(c["aviso_id"])

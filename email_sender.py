@@ -205,3 +205,81 @@ def send_cyclone_email(cyclone_data, docx_path):
     except Exception as e:
         logging.error(f"[EMAIL] Error al enviar correo SMTP: {e}")
         return False
+
+def send_whatsapp_disconnected_alert():
+    """
+    Envía una alerta por correo electrónico avisando que WhatsApp se ha desvinculado
+    y proporciona el enlace directo para escanear el QR.
+    """
+    smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
+    smtp_port = int(os.getenv("SMTP_PORT", "587"))
+    smtp_user = os.getenv("SMTP_USER", "").strip()
+    smtp_password = os.getenv("SMTP_PASSWORD", "").replace(" ", "").strip()
+    email_to_raw = os.getenv("EMAIL_TO", "").strip()
+
+    if not smtp_user or not smtp_password or not email_to_raw:
+        return False
+
+    recipients = [e.strip() for e in email_to_raw.split(",") if e.strip()]
+    if not recipients:
+        return False
+
+    subject = "⚠️ Alerta CFE: Sesión de WhatsApp Desvinculada"
+
+    html_body = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <style>
+            body { font-family: 'Segoe UI', Arial, sans-serif; background: #f4f6f9; padding: 20px; color: #333; }
+            .card { background: #fff; border-radius: 8px; padding: 24px; max-width: 550px; margin: auto; border-top: 4px solid #e74c3c; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+            h2 { color: #c0392b; margin-top: 0; font-size: 18px; }
+            .btn { display: inline-block; background: #1E5B4F; color: #ffffff !important; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; margin: 16px 0; }
+            p { font-size: 14px; line-height: 1.5; }
+            .footer { font-size: 11px; color: #888; border-top: 1px solid #eee; padding-top: 12px; margin-top: 20px; }
+        </style>
+    </head>
+    <body>
+        <div class="card">
+            <h2>⚠️ Atención: WhatsApp Desconectado</h2>
+            <p>El sistema automático de avisos de CFE detectó que la sesión de WhatsApp Web se ha desvinculado.</p>
+            <p>Los reportes por <strong>Correo</strong> y <strong>Telegram</strong> continúan funcionando con normalidad, pero para restablecer los envíos al grupo de WhatsApp se requiere volver a escanear el código QR:</p>
+            
+            <div style="text-align: center;">
+                <a href="https://cfe-avisos-ciclones.onrender.com/qr" class="btn" target="_blank">📱 Escanear Código QR Ahora</a>
+            </div>
+
+            <p style="font-size: 12px; color: #666;">
+                <strong>Instrucciones:</strong> Abre el enlace anterior desde tu celular o computadora y escanea el código desde tu WhatsApp (<em>Ajustes > Dispositivos vinculados > Vincular un dispositivo</em>).
+            </p>
+
+            <div class="footer">
+                Departamento de Hidrometeorología &bull; CFE Generación
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+
+    msg = MIMEMultipart("alternative")
+    msg["From"] = f"CFE Hidrometeorología <{smtp_user}>"
+    msg["To"] = ", ".join(recipients)
+    msg["Subject"] = subject
+    msg.attach(MIMEText(html_body, "html", "utf-8"))
+
+    try:
+        if smtp_port == 465:
+            server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=20)
+        else:
+            server = smtplib.SMTP(smtp_host, smtp_port, timeout=20)
+            server.starttls()
+            
+        server.login(smtp_user, smtp_password)
+        server.sendmail(smtp_user, recipients, msg.as_string())
+        server.quit()
+        logging.info(f"[ALERT] Correo de alerta de WhatsApp desvinculado enviado a {recipients}")
+        return True
+    except Exception as e:
+        logging.error(f"[ALERT] Error al enviar alerta de WhatsApp desvinculado: {e}")
+        return False
