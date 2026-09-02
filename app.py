@@ -10,7 +10,8 @@ import time
 import json
 import logging
 import threading
-from flask import Flask, jsonify, request, send_from_directory, render_template_string
+import requests as http_requests
+from flask import Flask, jsonify, request, send_from_directory, render_template_string, Response
 from smn_scraper import get_active_cyclones, fetch_cyclone_data
 from report_generator import generate_word_report
 from email_sender import send_cyclone_email
@@ -24,6 +25,7 @@ app = Flask(__name__)
 REPORTS_DIR = os.getenv("REPORTS_DIR", "reportes_generados")
 STATE_FILE = os.getenv("STATE_FILE", "state_processed.json")
 POLL_INTERVAL_MINUTES = int(os.getenv("POLL_INTERVAL_MINUTES", "15"))
+OPENWA_SERVER_URL = os.getenv("OPENWA_SERVER_URL", "http://localhost:8085")
 
 os.makedirs(REPORTS_DIR, exist_ok=True)
 
@@ -198,8 +200,8 @@ def index():
                             <p class="text-muted small mt-1 mb-0">Destino: {{ os.getenv('WHATSAPP_TO') }}</p>
                             {% else %}
                             <span class="badge bg-warning text-dark">🟡 Sin Destinatario</span>
-                            <p class="text-muted small mt-1 mb-0"><a href="http://localhost:8085/qr" target="_blank">Escanear QR</a></p>
                             {% endif %}
+                            <p class="mt-2 mb-0"><a href="/qr" class="btn btn-sm btn-outline-success w-100">📱 Ver/Escanear QR</a></p>
                         </div>
                     </div>
                 </div>
@@ -248,6 +250,16 @@ def index():
     </html>
     """
     return render_template_string(html, files=files, state=state, smtp_configured=smtp_configured, telegram_configured=telegram_configured, whatsapp_configured=whatsapp_configured, os=os)
+
+
+@app.route("/qr")
+def proxy_qr():
+    """Proxy transparente al servidor de WhatsApp para mostrar la pantalla del QR."""
+    try:
+        r = http_requests.get(f"{OPENWA_SERVER_URL}/qr", timeout=10)
+        return Response(r.content, status=r.status_code, content_type=r.headers.get("content-type", "text/html"))
+    except Exception as e:
+        return f"<h3>Servidor de WhatsApp iniciando... por favor recarga en 5 segundos.</h3><p>{e}</p>", 503
 
 
 @app.route("/check", methods=["GET", "POST"])

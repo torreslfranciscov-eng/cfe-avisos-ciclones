@@ -1,0 +1,45 @@
+{
+  "name": "pico-s3",
+  "version": "2.11.0",
+  "description": "A lightweght S3 client that doesn't require the aws sdk.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "npm run build && ava --verbose"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/smashah/picoS3.git"
+  },
+  "keywords": [
+    "aws",
+    "sdk",
+    "s3",
+    "client",
+    "slim",
+    "simple",
+    "lightweight"
+  ],
+  "author": "SMASHAH <shah@idk.uno>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/smashah/picoS3/issues"
+  },
+  "homepage": "https://github.com/smashah/picoS3#readme",
+  "devDependencies": {
+    "@sindresorhus/tsconfig": "^5.0.0",
+    "@types/aws4": "^1.11.6",
+    "ava": "^6.4.1",
+    "dotenv": "^17.2.3",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@brillout/import": "^0.2.6",
+    "aws4": "^1.13.2",
+    "axios": "^1.12.2",
+    "datauri": "^4.1.0",
+    "debug": "^4.4.3",
+    "file-type": "^21.0.0"
+  }
+}
