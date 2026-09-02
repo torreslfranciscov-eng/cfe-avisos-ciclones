@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+reportes_generados/
+temp_images/
+node_modules/
+whatsapp_server/node_modules/
+whatsapp_server/auth_info_baileys/
+whatsapp_server/_IGNORE_*
+.DS_Store
