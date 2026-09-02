@@ -2,7 +2,7 @@
 app.py
 Servicio Web / API para monitoreo de avisos de ciclones tropicales de CFE (CONAGUA/SMN).
 Monitoreo automático cada 15 min, generación de reportes Word (.docx),
-envío automático por correo electrónico y canal de Telegram.
+notificaciones por Correo Electrónico, Telegram y WhatsApp.
 """
 
 import os
@@ -15,6 +15,7 @@ from smn_scraper import get_active_cyclones, fetch_cyclone_data
 from report_generator import generate_word_report
 from email_sender import send_cyclone_email
 from telegram_sender import send_cyclone_telegram
+from whatsapp_sender import send_cyclone_whatsapp
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
@@ -47,7 +48,7 @@ def save_processed_state(state):
 def run_cycle_check(force=False):
     """
     Ejecuta el ciclo de verificación contra SMN para Pacífico y Atlántico.
-    Genera el Word y envía notificaciones a Correo y Telegram.
+    Genera el Word y envía notificaciones a Correo, Telegram y WhatsApp.
     """
     state = load_processed_state()
     cyclones = get_active_cyclones()
@@ -76,12 +77,16 @@ def run_cycle_check(force=False):
             # 2. Envío por Canal de Telegram
             telegram_sent = send_cyclone_telegram(data, doc_path)
 
+            # 3. Envío por WhatsApp
+            whatsapp_sent = send_cyclone_whatsapp(data, doc_path)
+
             state[state_key] = {
                 "label": label,
                 "cuenca": cuenca,
                 "filename": filename,
                 "email_sent": email_sent,
                 "telegram_sent": telegram_sent,
+                "whatsapp_sent": whatsapp_sent,
                 "timestamp": str(os.path.getmtime(doc_path))
             }
             generated.append({
@@ -90,7 +95,8 @@ def run_cycle_check(force=False):
                 "label": label,
                 "filename": filename,
                 "email_sent": email_sent,
-                "telegram_sent": telegram_sent
+                "telegram_sent": telegram_sent,
+                "whatsapp_sent": whatsapp_sent
             })
 
     save_processed_state(state)
@@ -122,6 +128,7 @@ def index():
     files.sort(key=lambda x: os.path.getmtime(os.path.join(REPORTS_DIR, x)), reverse=True)
     smtp_configured = bool(os.getenv("SMTP_USER") and os.getenv("EMAIL_TO"))
     telegram_configured = bool(os.getenv("TELEGRAM_BOT_TOKEN") and os.getenv("TELEGRAM_CHAT_ID"))
+    whatsapp_configured = bool(os.getenv("WHATSAPP_TO"))
 
     html = """
     <!DOCTYPE html>
@@ -142,44 +149,56 @@ def index():
         <div class="container">
             <div class="hero-card shadow">
                 <h2>🌀 CFE Hidrometeorología &mdash; Avisos de Ciclón Tropical</h2>
-                <p class="lead mb-0">Monitoreo 24/7, reportes Word (.docx), notificaciones por <strong>Correo</strong> y <strong>Telegram</strong></p>
+                <p class="lead mb-0">Monitoreo 24/7, Word (.docx) y notificaciones automáticas por <strong>Correo</strong>, <strong>Telegram</strong> y <strong>WhatsApp</strong></p>
             </div>
 
             <div class="row mb-4">
-                <div class="col-md-4">
+                <div class="col-md-3">
                     <div class="card shadow-sm h-100">
                         <div class="card-body">
                             <h5 class="card-title">Acciones</h5>
-                            <p class="card-text">Monitoreo automático cada 15 min. Forzar verificación manual:</p>
-                            <a href="/check?force=true" class="btn btn-success mb-2 w-100">⚡ Forzar Notificaciones Ahora</a>
-                            <a href="/check" class="btn btn-outline-primary w-100">🔍 Verificar Nuevos</a>
+                            <p class="card-text small">Revisión cada 15 min:</p>
+                            <a href="/check?force=true" class="btn btn-success mb-2 w-100 btn-sm">⚡ Forzar Notificaciones</a>
+                            <a href="/check" class="btn btn-outline-primary w-100 btn-sm">🔍 Verificar Nuevos</a>
                         </div>
                     </div>
                 </div>
-                <div class="col-md-4">
+                <div class="col-md-3">
                     <div class="card shadow-sm h-100">
                         <div class="card-body">
-                            <h5 class="card-title">📧 Correo Electrónico</h5>
+                            <h5 class="card-title">📧 Correo</h5>
                             {% if smtp_configured %}
-                            <p class="card-text mb-1"><span class="badge bg-success">🟢 Activo</span></p>
-                            <p class="text-muted small mb-0">Enviando a: <code>{{ os.getenv('EMAIL_TO') }}</code></p>
+                            <span class="badge bg-success">🟢 Activo</span>
+                            <p class="text-muted small mt-1 mb-0">{{ os.getenv('EMAIL_TO') }}</p>
                             {% else %}
-                            <p class="card-text mb-1"><span class="badge bg-warning text-dark">🟡 No configurado</span></p>
-                            <p class="text-muted small mb-0">Faltan variables <code>SMTP_USER</code> y <code>EMAIL_TO</code>.</p>
+                            <span class="badge bg-warning text-dark">🟡 No configurado</span>
                             {% endif %}
                         </div>
                     </div>
                 </div>
-                <div class="col-md-4">
+                <div class="col-md-3">
                     <div class="card shadow-sm h-100">
                         <div class="card-body">
-                            <h5 class="card-title">✈️ Canal de Telegram</h5>
+                            <h5 class="card-title">✈️ Telegram</h5>
                             {% if telegram_configured %}
-                            <p class="card-text mb-1"><span class="badge bg-success">🟢 Activo</span></p>
-                            <p class="text-muted small mb-0">Canal: <code>{{ os.getenv('TELEGRAM_CHAT_ID') }}</code></p>
+                            <span class="badge bg-success">🟢 Activo</span>
+                            <p class="text-muted small mt-1 mb-0">Canal: {{ os.getenv('TELEGRAM_CHAT_ID') }}</p>
                             {% else %}
-                            <p class="card-text mb-1"><span class="badge bg-warning text-dark">🟡 No configurado</span></p>
-                            <p class="text-muted small mb-0">Agrega <code>TELEGRAM_BOT_TOKEN</code> y <code>TELEGRAM_CHAT_ID</code>.</p>
+                            <span class="badge bg-warning text-dark">🟡 No configurado</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card shadow-sm h-100">
+                        <div class="card-body">
+                            <h5 class="card-title">💬 WhatsApp</h5>
+                            {% if whatsapp_configured %}
+                            <span class="badge bg-success">🟢 Activo</span>
+                            <p class="text-muted small mt-1 mb-0">Destino: {{ os.getenv('WHATSAPP_TO') }}</p>
+                            {% else %}
+                            <span class="badge bg-warning text-dark">🟡 Sin Destinatario</span>
+                            <p class="text-muted small mt-1 mb-0"><a href="http://localhost:8085/qr" target="_blank">Escanear QR</a></p>
                             {% endif %}
                         </div>
                     </div>
@@ -228,7 +247,7 @@ def index():
     </body>
     </html>
     """
-    return render_template_string(html, files=files, state=state, smtp_configured=smtp_configured, telegram_configured=telegram_configured, os=os)
+    return render_template_string(html, files=files, state=state, smtp_configured=smtp_configured, telegram_configured=telegram_configured, whatsapp_configured=whatsapp_configured, os=os)
 
 
 @app.route("/check", methods=["GET", "POST"])
