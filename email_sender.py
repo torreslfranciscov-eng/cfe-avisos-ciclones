@@ -7,11 +7,27 @@ e imágenes satelitales y de cono de trayectoria de Avisos de Ciclón Tropical C
 import os
 import smtplib
 import logging
+import traceback
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email.mime.image import MIMEImage
 from email import encoders
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+
+
+def _send_smtp_message(smtp_host, smtp_port, smtp_user, smtp_password, recipients, msg_str):
+    """
+    Realiza la conexión SMTP a través de STARTTLS (puerto 587 por defecto) y envía el mensaje.
+    """
+    server = smtplib.SMTP(smtp_host, smtp_port, timeout=30)
+    server.ehlo()
+    server.starttls()
+    server.ehlo()
+    server.login(smtp_user, smtp_password)
+    server.sendmail(smtp_user, recipients, msg_str)
+    server.quit()
 
 
 def send_cyclone_email(cyclone_data, docx_path):
@@ -19,8 +35,9 @@ def send_cyclone_email(cyclone_data, docx_path):
     Envía por correo electrónico la notificación del aviso junto con las imágenes
     incrustadas (satélite y trayectoria) y el archivo Word adjunto.
     """
-    smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
-    smtp_port = int(os.getenv("SMTP_PORT", "587"))
+    smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com").strip()
+    smtp_port_raw = os.getenv("SMTP_PORT", "587").strip()
+    smtp_port = int(smtp_port_raw) if smtp_port_raw.isdigit() else 587
     smtp_user = os.getenv("SMTP_USER", "").strip()
     smtp_password = os.getenv("SMTP_PASSWORD", "").replace(" ", "").strip()
     email_to_raw = os.getenv("EMAIL_TO", "").strip()
@@ -41,7 +58,7 @@ def send_cyclone_email(cyclone_data, docx_path):
     proximo = cyclone_data.get("proximo_aviso", "")
     img_sat_path = cyclone_data.get("img_sat_path")
     img_tray_path = cyclone_data.get("img_tray_path")
-    filename = os.path.basename(docx_path)
+    filename = os.path.basename(docx_path) if docx_path else f"Aviso_{sistema}.docx"
 
     subject = f"🌀 Aviso Meteorológico CFE: {sistema} ({cuenca})"
 
@@ -171,7 +188,7 @@ def send_cyclone_email(cyclone_data, docx_path):
             logging.error(f"[EMAIL] Error al incrustar tray_img: {e}")
 
     # Adjuntar archivo Word (.docx) con codificación RFC 2231 y MIME type oficial de Word
-    if os.path.exists(docx_path):
+    if docx_path and os.path.exists(docx_path):
         try:
             with open(docx_path, "rb") as f:
                 part = MIMEBase(
@@ -191,28 +208,23 @@ def send_cyclone_email(cyclone_data, docx_path):
             logging.error(f"[EMAIL] Error al adjuntar archivo Word: {e}")
 
     try:
-        if smtp_port == 465:
-            server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=20)
-        else:
-            server = smtplib.SMTP(smtp_host, smtp_port, timeout=20)
-            server.starttls()
-            
-        server.login(smtp_user, smtp_password)
-        server.sendmail(smtp_user, recipients, msg.as_string())
-        server.quit()
-        logging.info(f"[EMAIL] Notificación con imágenes y Word enviada a: {', '.join(recipients)}")
+        _send_smtp_message(smtp_host, smtp_port, smtp_user, smtp_password, recipients, msg.as_string())
+        logging.info(f"[EMAIL] Notificación enviada con éxito a: {', '.join(recipients)}")
         return True
     except Exception as e:
         logging.error(f"[EMAIL] Error al enviar correo SMTP: {e}")
+        traceback.print_exc()
         return False
+
 
 def send_whatsapp_disconnected_alert():
     """
     Envía una alerta por correo electrónico avisando que WhatsApp se ha desvinculado
     y proporciona el enlace directo para escanear el QR.
     """
-    smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
-    smtp_port = int(os.getenv("SMTP_PORT", "587"))
+    smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com").strip()
+    smtp_port_raw = os.getenv("SMTP_PORT", "587").strip()
+    smtp_port = int(smtp_port_raw) if smtp_port_raw.isdigit() else 587
     smtp_user = os.getenv("SMTP_USER", "").strip()
     smtp_password = os.getenv("SMTP_PASSWORD", "").replace(" ", "").strip()
     email_to_raw = os.getenv("EMAIL_TO", "").strip()
@@ -269,15 +281,7 @@ def send_whatsapp_disconnected_alert():
     msg.attach(MIMEText(html_body, "html", "utf-8"))
 
     try:
-        if smtp_port == 465:
-            server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=20)
-        else:
-            server = smtplib.SMTP(smtp_host, smtp_port, timeout=20)
-            server.starttls()
-            
-        server.login(smtp_user, smtp_password)
-        server.sendmail(smtp_user, recipients, msg.as_string())
-        server.quit()
+        _send_smtp_message(smtp_host, smtp_port, smtp_user, smtp_password, recipients, msg.as_string())
         logging.info(f"[ALERT] Correo de alerta de WhatsApp desvinculado enviado a {recipients}")
         return True
     except Exception as e:
