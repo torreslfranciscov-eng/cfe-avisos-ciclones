@@ -107,14 +107,23 @@ def send_cyclone_email(cyclone_data, docx_path):
     msg["Subject"] = subject
     msg.attach(MIMEText(html_body, "html", "utf-8"))
 
-    # Adjuntar archivo Word (.docx)
+    # Adjuntar archivo Word (.docx) con codificación RFC 2231 y MIME type oficial de Word
     if os.path.exists(docx_path):
         try:
             with open(docx_path, "rb") as f:
-                part = MIMEBase("application", "octet-stream")
+                part = MIMEBase(
+                    "application",
+                    "vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
                 part.set_payload(f.read())
             encoders.encode_base64(part)
-            part.add_header("Content-Disposition", f'attachment; filename="{filename}"')
+            
+            # Formato estándar RFC 2231 compatible con Gmail, Outlook, etc.
+            part.add_header(
+                "Content-Disposition",
+                "attachment",
+                filename=("utf-8", "", filename)
+            )
             msg.attach(part)
         except Exception as e:
             logging.error(f"[EMAIL] Error al adjuntar archivo Word: {e}")
