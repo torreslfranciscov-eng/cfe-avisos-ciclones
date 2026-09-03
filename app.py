@@ -2,7 +2,7 @@
 app.py
 Servicio Web / API para monitoreo de avisos de ciclones tropicales de CFE (CONAGUA/SMN).
 Monitoreo automático cada 15 min, generación de reportes Word (.docx),
-notificaciones por Correo Electrónico, Telegram y WhatsApp, y alertas de desconexión.
+notificaciones por Correo Electrónico, Telegram y WhatsApp, y Asistente Centinela Bot.
 """
 
 import os
@@ -17,6 +17,7 @@ from report_generator import generate_word_report
 from email_sender import send_cyclone_email, send_whatsapp_disconnected_alert
 from telegram_sender import send_cyclone_telegram
 from whatsapp_sender import send_cyclone_whatsapp
+from centinela_bot import handle_incoming_whatsapp_message
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
@@ -51,7 +52,6 @@ def save_processed_state(state):
 def check_whatsapp_health():
     """Verifica si WhatsApp sigue conectado. Si se desvinculó, envía correo de alerta."""
     global last_wa_alert_time
-    # Solo alertar si WhatsApp está configurado para usarse
     if not os.getenv("WHATSAPP_TO"):
         return
         
@@ -60,7 +60,6 @@ def check_whatsapp_health():
         data = r.json()
         if not data.get("isReady"):
             now = time.time()
-            # Enviar máximo una alerta cada 4 horas para no saturar
             if now - last_wa_alert_time > 14400:
                 logging.warning("[WHATSAPP] Sesión desvinculada detectada. Enviando correo de alerta...")
                 send_whatsapp_disconnected_alert()
@@ -78,7 +77,6 @@ def run_cycle_check(force=False):
     cyclones = get_active_cyclones()
     generated = []
 
-    # Verificar estado de WhatsApp
     check_whatsapp_health()
 
     for c in cyclones:
@@ -98,13 +96,8 @@ def run_cycle_check(force=False):
             doc_path = generate_word_report(data, output_dir=REPORTS_DIR)
             filename = os.path.basename(doc_path)
 
-            # 1. Envío por Correo Electrónico
             email_sent = send_cyclone_email(data, doc_path)
-
-            # 2. Envío por Canal de Telegram
             telegram_sent = send_cyclone_telegram(data, doc_path)
-
-            # 3. Envío por WhatsApp
             whatsapp_sent = send_cyclone_whatsapp(data, doc_path)
 
             state[state_key] = {
@@ -163,7 +156,7 @@ def index():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>CFE - Sistema de Avisos de Ciclón Tropical</title>
+        <title>CFE - Sistema de Avisos de Ciclón Tropical & Centinela</title>
         <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
         <style>
             body { background: #f4f6f9; font-family: 'Segoe UI', sans-serif; }
@@ -175,7 +168,7 @@ def index():
     <body class="p-4">
         <div class="container">
             <div class="hero-card shadow">
-                <h2>🌀 CFE Hidrometeorología &mdash; Avisos de Ciclón Tropical</h2>
+                <h2>🌀 CFE Hidrometeorología &mdash; Avisos de Ciclón & Centinela Bot</h2>
                 <p class="lead mb-0">Monitoreo 24/7, Word (.docx) y notificaciones automáticas por <strong>Correo</strong>, <strong>Telegram</strong> y <strong>WhatsApp</strong></p>
             </div>
 
@@ -219,7 +212,7 @@ def index():
                 <div class="col-md-3">
                     <div class="card shadow-sm h-100">
                         <div class="card-body">
-                            <h5 class="card-title">💬 WhatsApp</h5>
+                            <h5 class="card-title">💬 WhatsApp & Centinela</h5>
                             {% if whatsapp_configured %}
                             <span class="badge bg-success">🟢 Activo</span>
                             <p class="text-muted small mt-1 mb-0">Destino: {{ os.getenv('WHATSAPP_TO') }}</p>
@@ -275,6 +268,15 @@ def index():
     </html>
     """
     return render_template_string(html, files=files, state=state, smtp_configured=smtp_configured, telegram_configured=telegram_configured, whatsapp_configured=whatsapp_configured, os=os)
+
+
+@app.route("/api/whatsapp/webhook", methods=["POST"])
+def whatsapp_incoming_webhook():
+    """Recibe mensajes entrantes de WhatsApp y los procesa con Centinela Bot."""
+    payload = request.get_json(force=True, silent=True)
+    if payload:
+        threading.Thread(target=handle_incoming_whatsapp_message, args=(payload,), daemon=True).start()
+    return jsonify({"status": "received"}), 200
 
 
 @app.route("/qr")

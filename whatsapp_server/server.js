@@ -21,7 +21,7 @@ const PORT = process.env.WA_PORT || 8085;
 let waSock = null;
 let latestQrDataUrl = null;
 let clientStatus = 'INITIALIZING';
-let webhookUrl = process.env.WHATSAPP_WEBHOOK_URL || 'https://centinela.runasp.net/api/whatsapp/webhook';
+let webhookUrl = process.env.WHATSAPP_WEBHOOK_URL || 'http://localhost:10000/api/whatsapp/webhook';
 
 app.get('/status', (req, res) => {
     res.json({
@@ -40,8 +40,7 @@ app.get('/qr', (req, res) => {
             <head><title>WhatsApp CFE Conectado</title></head>
             <body style="font-family: sans-serif; text-align: center; padding: 50px; background: #eef7f4;">
                 <h1 style="color: #1E5B4F;">✅ WhatsApp Conectado con Éxito</h1>
-                <p>El cliente de WhatsApp de CFE está listo para enviar avisos meteorológicos a grupos y números.</p>
-                <p>Webhook activo hacia: <code>${webhookUrl}</code></p>
+                <p>El cliente de WhatsApp de CFE está listo para enviar avisos meteorológicos y responder como Centinela Bot.</p>
                 <p><a href="/groups" style="color: #1E5B4F; font-weight: bold;">Ver grupos disponibles</a></p>
             </body>
             </html>
@@ -85,15 +84,47 @@ app.get('/qr', (req, res) => {
     `);
 });
 
-// Endpoint para configurar o actualizar la URL del Webhook
-app.post('/setWebhook', (req, res) => {
-    const { url } = req.body;
-    if (url) {
-        webhookUrl = url.trim();
-        console.log(`[WHATSAPP] Webhook actualizado a: ${webhookUrl}`);
-        return res.json({ ok: true, webhookUrl });
+// Endpoint para enviar mensaje de texto simple
+app.post('/sendText', async (req, res) => {
+    if (!waSock || clientStatus !== 'READY') {
+        return res.status(503).json({ ok: false, error: 'WhatsApp client not ready' });
     }
-    res.status(400).json({ ok: false, error: 'URL requerida' });
+    const { to, text } = req.body;
+    try {
+        let jid = to;
+        if (!jid.includes('@')) {
+            jid = `${jid}@s.whatsapp.net`;
+        }
+        const result = await waSock.sendMessage(jid, { text: text || '' });
+        res.json({ ok: true, result });
+    } catch (err) {
+        console.error('Error enviando texto:', err);
+        res.status(500).json({ ok: false, error: err.toString() });
+    }
+});
+
+// Endpoint para enviar imagen en Base64
+app.post('/sendBase64Image', async (req, res) => {
+    if (!waSock || clientStatus !== 'READY') {
+        return res.status(503).json({ ok: false, error: 'WhatsApp client not ready' });
+    }
+    const { to, base64: b64String, caption, filename } = req.body;
+    try {
+        let jid = to;
+        if (!jid.includes('@')) {
+            jid = `${jid}@s.whatsapp.net`;
+        }
+        const buffer = Buffer.from(b64String, 'base64');
+        const result = await waSock.sendMessage(jid, {
+            image: buffer,
+            caption: caption || '',
+            fileName: filename || 'imagen.png'
+        });
+        res.json({ ok: true, result });
+    } catch (err) {
+        console.error('Error enviando imagen base64:', err);
+        res.status(500).json({ ok: false, error: err.toString() });
+    }
 });
 
 // Endpoint para listar todos los grupos en los que participa la cuenta
@@ -128,7 +159,6 @@ async function resolveJid(to) {
         const normalizedTarget = to.trim().toLowerCase();
         for (const g of Object.values(groups)) {
             if (g.subject.trim().toLowerCase() === normalizedTarget || g.subject.trim().toLowerCase().includes(normalizedTarget)) {
-                console.log(`[WHATSAPP] Grupo encontrado: '${g.subject}' -> JID: ${g.id}`);
                 return g.id;
             }
         }
@@ -138,7 +168,7 @@ async function resolveJid(to) {
     return to;
 }
 
-// Endpoint para enviar aviso completo (fotos satélite/cono + Word adjunto)
+// Endpoint para enviar aviso completo de ciclón (fotos satélite/cono + Word adjunto)
 app.post('/sendCycloneNotice', async (req, res) => {
     if (!waSock || clientStatus !== 'READY') {
         return res.status(503).json({ ok: false, error: 'WhatsApp client not ready' });
@@ -207,7 +237,7 @@ async function startBaileys() {
 
     waSock.ev.on('creds.update', saveCreds);
 
-    // ESCUCHAR MENSAJES ENTRANTES Y REENVIARLOS AL WEBHOOK
+    // ESCUCHAR MENSAJES ENTRANTES Y REENVIARLOS AL CENTINELA BOT / WEBHOOK
     waSock.ev.on('messages.upsert', async (m) => {
         if (!webhookUrl || m.type !== 'notify') return;
 
@@ -236,14 +266,22 @@ async function startBaileys() {
             };
 
             try {
-                const response = await fetch(webhookUrl, {
+                // Enviar tanto al bot local interno como a cualquier webhook configurado
+                fetch('http://localhost:10000/api/whatsapp/webhook', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
-                });
-                console.log(`[WHATSAPP WEBHOOK] Mensaje reenviado a ${webhookUrl} -> Status: ${response.status}`);
+                }).catch(() => {});
+
+                if (webhookUrl && webhookUrl !== 'http://localhost:10000/api/whatsapp/webhook') {
+                    fetch(webhookUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    }).catch(() => {});
+                }
             } catch (err) {
-                console.error(`[WHATSAPP WEBHOOK] Error al enviar a ${webhookUrl}:`, err.message);
+                console.error('[WHATSAPP] Error al procesar mensaje entrante:', err.message);
             }
         }
     });
@@ -275,6 +313,5 @@ async function startBaileys() {
 
 app.listen(PORT, () => {
     console.log(`🚀 Servidor WhatsApp CFE escuchando en http://localhost:${PORT}`);
-    console.log(`🌐 Webhook destino configurado: ${webhookUrl}`);
     startBaileys();
 });
