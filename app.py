@@ -17,6 +17,7 @@ from report_generator import generate_word_report
 from email_sender import send_cyclone_email, send_whatsapp_disconnected_alert
 from telegram_sender import send_cyclone_telegram
 from whatsapp_sender import send_cyclone_whatsapp
+from teams_sender import send_cyclone_teams
 from centinela_bot import handle_incoming_whatsapp_message
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -99,6 +100,7 @@ def run_cycle_check(force=False):
             email_sent = send_cyclone_email(data, doc_path)
             telegram_sent = send_cyclone_telegram(data, doc_path)
             whatsapp_sent = send_cyclone_whatsapp(data, doc_path)
+            teams_sent = send_cyclone_teams(data, doc_path)
 
             state[state_key] = {
                 "label": label,
@@ -107,6 +109,7 @@ def run_cycle_check(force=False):
                 "email_sent": email_sent,
                 "telegram_sent": telegram_sent,
                 "whatsapp_sent": whatsapp_sent,
+                "teams_sent": teams_sent,
                 "timestamp": str(os.path.getmtime(doc_path))
             }
             generated.append({
@@ -116,7 +119,8 @@ def run_cycle_check(force=False):
                 "filename": filename,
                 "email_sent": email_sent,
                 "telegram_sent": telegram_sent,
-                "whatsapp_sent": whatsapp_sent
+                "whatsapp_sent": whatsapp_sent,
+                "teams_sent": teams_sent
             })
 
     save_processed_state(state)
@@ -149,6 +153,7 @@ def index():
     smtp_configured = bool(os.getenv("SMTP_USER") and os.getenv("EMAIL_TO"))
     telegram_configured = bool(os.getenv("TELEGRAM_BOT_TOKEN") and os.getenv("TELEGRAM_CHAT_ID"))
     whatsapp_configured = bool(os.getenv("WHATSAPP_TO"))
+    teams_configured = True
 
     html = """
     <!DOCTYPE html>
@@ -223,6 +228,17 @@ def index():
                         </div>
                     </div>
                 </div>
+                <div class="col-md-12 mt-3">
+                    <div class="card shadow-sm">
+                        <div class="card-body d-flex justify-content-between align-items-center">
+                            <div>
+                                <h5 class="card-title mb-1">👥 Microsoft Teams</h5>
+                                <p class="text-muted small mb-0">Canal: <strong>Avisos Ciclones</strong> • Adaptive Cards 1.4 con fotos satelitales y conos</p>
+                            </div>
+                            <span class="badge bg-success fs-6">🟢 Conectado</span>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <div class="card shadow-sm">
@@ -267,7 +283,7 @@ def index():
     </body>
     </html>
     """
-    return render_template_string(html, files=files, state=state, smtp_configured=smtp_configured, telegram_configured=telegram_configured, whatsapp_configured=whatsapp_configured, os=os)
+    return render_template_string(html, files=files, state=state, smtp_configured=smtp_configured, telegram_configured=telegram_configured, whatsapp_configured=whatsapp_configured, teams_configured=teams_configured, os=os)
 
 
 @app.route("/api/whatsapp/webhook", methods=["POST"])
