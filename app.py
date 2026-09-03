@@ -279,6 +279,27 @@ def whatsapp_incoming_webhook():
     return jsonify({"status": "received"}), 200
 
 
+
+@app.route("/logout")
+@app.route("/logout/")
+def proxy_logout():
+    """Cierra la sesión de WhatsApp y redirige a escanear un nuevo QR."""
+    openwa_url = os.getenv("OPENWA_SERVER_URL", "http://localhost:8085").rstrip("/")
+    try:
+        http_requests.get(f"{openwa_url}/logout", timeout=10)
+    except Exception:
+        pass
+    return render_template_string('''
+        <!DOCTYPE html>
+        <html>
+        <head><meta http-equiv="refresh" content="2;url=/qr"></head>
+        <body style="font-family: sans-serif; text-align: center; padding: 50px;">
+            <h3>🔄 Sesión cerrada con éxito.</h3>
+            <p>Generando nuevo código QR para vincular tu otro número...</p>
+        </body>
+        </html>
+    ''')
+
 @app.route("/qr")
 @app.route("/qr/")
 def proxy_qr():

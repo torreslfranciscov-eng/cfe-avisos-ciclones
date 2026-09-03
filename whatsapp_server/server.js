@@ -27,6 +27,27 @@ let webhookUrl = process.env.WHATSAPP_WEBHOOK_URL || `http://127.0.0.1:${FLASK_P
 // Registro de IDs enviados por el bot para evitar bucles infinitos
 const botSentMessageIds = new Set();
 
+
+// Endpoint para cerrar sesión y reiniciar QR
+app.get('/logout', async (req, res) => {
+    try {
+        if (waSock) {
+            try { await waSock.logout(); } catch(e) {}
+        }
+        const authFolder = path.join(__dirname, 'auth_info_baileys');
+        if (fs.existsSync(authFolder)) {
+            fs.rmSync(authFolder, { recursive: true, force: true });
+        }
+        clientStatus = 'INITIALIZING';
+        latestQrDataUrl = null;
+        setTimeout(startBaileys, 1000);
+        return res.redirect('/qr');
+    } catch (err) {
+        console.error('Error al cerrar sesión:', err);
+        return res.status(500).send('Error al cerrar sesión: ' + err.message);
+    }
+});
+
 app.get('/status', (req, res) => {
     res.json({
         status: clientStatus,
