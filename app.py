@@ -318,13 +318,12 @@ def proxy_groups():
 @app.route("/check", methods=["GET", "POST"])
 def check():
     force = request.args.get("force", "false").lower() == "true"
-    generated, total_active = run_cycle_check(force=force)
+    # Ejecutar en segundo plano para evitar timeouts de 30s en peticiones HTTP
+    threading.Thread(target=run_cycle_check, kwargs={"force": force}, daemon=True).start()
     return jsonify({
-        "status": "success",
-        "total_active_cyclones": total_active,
-        "new_reports_generated": len(generated),
-        "details": generated
-    })
+        "status": "triggered",
+        "message": "Revisión y envío de avisos SMN iniciado en segundo plano exitosamente."
+    }), 200
 
 
 @app.route("/api/cyclones", methods=["GET"])

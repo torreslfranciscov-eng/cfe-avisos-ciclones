@@ -18,10 +18,14 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 const PORT = process.env.WA_PORT || 8085;
+const FLASK_PORT = process.env.PORT || 10000;
 let waSock = null;
 let latestQrDataUrl = null;
 let clientStatus = 'INITIALIZING';
-let webhookUrl = process.env.WHATSAPP_WEBHOOK_URL || 'http://localhost:10000/api/whatsapp/webhook';
+let webhookUrl = process.env.WHATSAPP_WEBHOOK_URL || `http://127.0.0.1:${FLASK_PORT}/api/whatsapp/webhook`;
+
+// Registro de IDs enviados por el bot para evitar bucles infinitos
+const botSentMessageIds = new Set();
 
 app.get('/status', (req, res) => {
     res.json({
@@ -96,6 +100,9 @@ app.post('/sendText', async (req, res) => {
             jid = `${jid}@s.whatsapp.net`;
         }
         const result = await waSock.sendMessage(jid, { text: text || '' });
+        if (result?.key?.id) {
+            botSentMessageIds.add(result.key.id);
+        }
         res.json({ ok: true, result });
     } catch (err) {
         console.error('Error enviando texto:', err);
@@ -120,6 +127,9 @@ app.post('/sendBase64Image', async (req, res) => {
             caption: caption || '',
             fileName: filename || 'imagen.png'
         });
+        if (result?.key?.id) {
+            botSentMessageIds.add(result.key.id);
+        }
         res.json({ ok: true, result });
     } catch (err) {
         console.error('Error enviando imagen base64:', err);
@@ -185,9 +195,11 @@ app.post('/sendCycloneNotice', async (req, res) => {
                 image: bufferSat,
                 caption: caption || ''
             });
+            if (resSat?.key?.id) botSentMessageIds.add(resSat.key.id);
             results.push({ type: 'sat', resSat });
         } else if (caption) {
             const resText = await waSock.sendMessage(jid, { text: caption });
+            if (resText?.key?.id) botSentMessageIds.add(resText.key.id);
             results.push({ type: 'text', resText });
         }
 
@@ -198,6 +210,7 @@ app.post('/sendCycloneNotice', async (req, res) => {
                 image: bufferTray,
                 caption: '🗺️ Cono de Pronóstico de Trayectoria'
             });
+            if (resTray?.key?.id) botSentMessageIds.add(resTray.key.id);
             results.push({ type: 'tray', resTray });
         }
 
@@ -211,6 +224,7 @@ app.post('/sendCycloneNotice', async (req, res) => {
                 fileName: fname,
                 caption: `📄 Reporte Oficial Word: ${fname}`
             });
+            if (resDoc?.key?.id) botSentMessageIds.add(resDoc.key.id);
             results.push({ type: 'doc', resDoc });
         }
 
@@ -239,11 +253,14 @@ async function startBaileys() {
 
     // ESCUCHAR MENSAJES ENTRANTES Y REENVIARLOS AL CENTINELA BOT / WEBHOOK
     waSock.ev.on('messages.upsert', async (m) => {
-        if (!webhookUrl || m.type !== 'notify') return;
+        if (m.type !== 'notify') return;
 
         for (const msg of m.messages) {
-            // Ignorar mensajes enviados por el propio bot
-            if (msg.key.fromMe) continue;
+            // Ignorar respuestas generadas por el propio servidor
+            if (msg.key.id && botSentMessageIds.has(msg.key.id)) {
+                botSentMessageIds.delete(msg.key.id);
+                continue;
+            }
 
             const from = msg.key.remoteJid;
             const isGroup = from.endsWith('@g.us');
@@ -252,6 +269,8 @@ async function startBaileys() {
                          msg.message?.extendedTextMessage?.text || 
                          msg.message?.imageMessage?.caption || 
                          '';
+
+            if (!text.trim()) continue;
 
             const payload = {
                 from: from,
@@ -265,15 +284,15 @@ async function startBaileys() {
                 raw: msg
             };
 
+            const flaskUrl = `http://127.0.0.1:${FLASK_PORT}/api/whatsapp/webhook`;
             try {
-                // Enviar tanto al bot local interno como a cualquier webhook configurado
-                fetch('http://localhost:10000/api/whatsapp/webhook', {
+                fetch(flaskUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
-                }).catch(() => {});
+                }).catch((e) => console.error('[WHATSAPP] Error al enviar a Flask:', e.message));
 
-                if (webhookUrl && webhookUrl !== 'http://localhost:10000/api/whatsapp/webhook') {
+                if (webhookUrl && webhookUrl !== flaskUrl) {
                     fetch(webhookUrl, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
