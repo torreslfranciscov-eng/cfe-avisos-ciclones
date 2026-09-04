@@ -304,8 +304,7 @@ def _build_teams_header(title="🤖 Centinela SPH Grijalva", subtitle="Subgerenc
                 "type": "TextBlock",
                 "text": title,
                 "weight": "Bolder",
-                "size": "Medium",
-                "color": "Dark"
+                "size": "Medium"
             },
             {
                 "type": "TextBlock",
@@ -338,8 +337,13 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
     server_base_url = (server_base_url or "https://cfe-avisos-ciclones.onrender.com").rstrip("/")
     raw_text = (payload.get("text") or "").strip()
     
-    # Limpiar menciones de Teams <at>Centinela</at> y entidades HTML
-    clean_text = re.sub(r"<[^>]+>", "", raw_text).replace("&nbsp;", " ").strip()
+    # 1. Limpiar etiquetas HTML (<at>...</at>, <p>, &nbsp;, etc.)
+    clean_text = re.sub(r"<[^>]+>", " ", raw_text)
+    clean_text = clean_text.replace("&nbsp;", " ")
+    clean_text = re.sub(r"\s+", " ", clean_text).strip()
+    
+    # 2. Remover el prefijo del nombre del bot si viene en el texto (ej. "Centinela 1", "centinela, embalses")
+    clean_text = re.sub(r"^(centinela|bot)\b[\s,:]*", "", clean_text, flags=re.IGNORECASE).strip()
     user_name = payload.get("from", {}).get("name", "Ingeniero(a)")
     cmd = clean_text.lower()
 
@@ -534,8 +538,7 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
                 {
                     "type": "TextBlock",
                     "text": f"**Pregunta:** _{question}_",
-                    "wrap": True,
-                    "color": "Dark"
+                    "wrap": True
                 }
             ]
         },
