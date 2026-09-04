@@ -12,6 +12,7 @@ import hashlib
 import datetime
 import logging
 import requests
+import urllib.parse
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
@@ -26,6 +27,43 @@ DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY") or "".join(chr(c ^ 42) for c in
 mensajes_procesados = {}
 usuarios_en_modo_ia = {}
 _blob_cache = {}
+
+
+def generate_blob_sas_url(container, blob_name, expiry_hours=48):
+    """Genera una URL directa de Azure Blob Storage con token SAS de lectura (válido 48h) nativa para Microsoft Teams."""
+    key = AZURE_KEY or os.getenv("AZURE_KEY", "")
+    if not key:
+        return None
+    try:
+        now = datetime.datetime.now(datetime.timezone.utc)
+        start_time = (now - datetime.timedelta(minutes=10)).strftime('%Y-%m-%dT%H:%M:%SZ')
+        expiry_time = (now + datetime.timedelta(hours=expiry_hours)).strftime('%Y-%m-%dT%H:%M:%SZ')
+        signed_permissions = 'r'
+        signed_service = 'b'
+        signed_resource_types = 'o'
+        signed_protocol = 'https'
+        signed_version = '2020-10-02'
+
+        string_to_sign = f'{AZURE_ACCOUNT}\n{signed_permissions}\n{signed_service}\n{signed_resource_types}\n{start_time}\n{expiry_time}\n\n{signed_protocol}\n{signed_version}\n'
+
+        decoded_key = base64.b64decode(key)
+        sig = base64.b64encode(hmac.new(decoded_key, string_to_sign.encode('utf-8'), hashlib.sha256).digest()).decode('utf-8')
+
+        params = {
+            'sv': signed_version,
+            'ss': signed_service,
+            'srt': signed_resource_types,
+            'sp': signed_permissions,
+            'st': start_time,
+            'se': expiry_time,
+            'spr': signed_protocol,
+            'sig': sig
+        }
+        qs = urllib.parse.urlencode(params)
+        return f'https://{AZURE_ACCOUNT}.blob.core.windows.net/{container}/{blob_name}?{qs}'
+    except Exception as e:
+        logging.error(f"[AZURE] Error al generar SAS URL: {e}")
+        return None
 
 
 def get_azure_blob_bytes(container, blob_name):
@@ -399,7 +437,7 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
     # 2. Reporte de Unidades (Opción 1)
     if cmd in ["1", "01"] or any(k in cmd for k in ["unidad", "unidades", "reporte de unidades", "opcion 1", "opción 1"]) or re.match(r"^1(\D|$)", cmd):
         blob_name = "9c8a7f42-3d91-4e01-a3fa-0d2e5b1c6f7d.png"
-        img_url = f"{server_base_url}/media/azure/unidades/{blob_name}"
+        img_url = generate_blob_sas_url("unidades", blob_name) or f"{server_base_url}/media/azure/unidades/{blob_name}"
         body = [
             _build_teams_header("📊 Reporte de Unidades Generadoras", "Sistema de Presas del Río Grijalva"),
             {
@@ -417,7 +455,7 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
     # 3. Power Monitoring (Opción 2)
     if cmd in ["2", "02"] or any(k in cmd for k in ["power", "monitoring", "powermonitoring", "power monitoring", "opcion 2", "opción 2"]) or re.match(r"^2(\D|$)", cmd):
         blob_name = "6f3b2c91-91df-41b6-9a1e-c3f0d0c8e24a.png"
-        img_url = f"{server_base_url}/media/azure/unidades/{blob_name}"
+        img_url = generate_blob_sas_url("unidades", blob_name) or f"{server_base_url}/media/azure/unidades/{blob_name}"
         body = [
             _build_teams_header("📊 Power Monitoring en Tiempo Real", "Monitoreo Eléctrico CFE SPH"),
             {
@@ -435,7 +473,7 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
     # 4. Gráfica de Potencia (Opción 3)
     if cmd in ["3", "03"] or any(k in cmd for k in ["potencia", "grafica potencia", "gráfica potencia", "opcion 3", "opción 3"]) or re.match(r"^3(\D|$)", cmd):
         blob_name = "b7e1f9c3-8a2d-4f5d-9c3a-7f1f6e7a2c01.png"
-        img_url = f"{server_base_url}/media/azure/unidades/{blob_name}"
+        img_url = generate_blob_sas_url("unidades", blob_name) or f"{server_base_url}/media/azure/unidades/{blob_name}"
         body = [
             _build_teams_header("📊 Gráfica de Potencia Actual", "Generación Total MW"),
             {
@@ -453,7 +491,7 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
     # 5. Condición de Embalses (Opción 4)
     if cmd in ["4", "04"] or any(k in cmd for k in ["embalse", "embalses", "presa", "presas", "nivel", "niveles", "cota", "cotas", "opcion 4", "opción 4"]) or re.match(r"^4(\D|$)", cmd):
         blob_name = "e1a5f734-9c2e-4b3b-8d5a-6f7e1d2c9b8f.png"
-        img_url = f"{server_base_url}/media/azure/unidades/{blob_name}"
+        img_url = generate_blob_sas_url("unidades", blob_name) or f"{server_base_url}/media/azure/unidades/{blob_name}"
         body = [
             _build_teams_header("📊 Condición de los Embalses", "Niveles, Cotas, Almacenamientos y Gastos"),
             {
@@ -471,7 +509,7 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
     # 6. Aportaciones por Cuenca (Opción 5)
     if cmd in ["5", "05"] or any(k in cmd for k in ["cuenca", "aportacion", "aportaciones", "aportación", "opcion 5", "opción 5"]) or re.match(r"^5(\D|$)", cmd):
         blob_name = "d42f3e19-b89c-4f02-90d4-3e7f4a6d2c01.png"
-        img_url = f"{server_base_url}/media/azure/unidades/{blob_name}"
+        img_url = generate_blob_sas_url("unidades", blob_name) or f"{server_base_url}/media/azure/unidades/{blob_name}"
         body = [
             _build_teams_header("📊 Aportaciones por Cuenca Propia", "Gastos de Entrada m³/s"),
             {
@@ -489,7 +527,7 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
     # 7. Reporte de Lluvias 24h (Opción 11)
     if cmd in ["11"] or any(k in cmd for k in ["lluvia 24", "lluvias 24", "lluvia 24h", "lluvias 24h", "24 horas", "opcion 11", "opción 11"]) or re.match(r"^11(\D|$)", cmd):
         blob_name = "reporte_lluvia_1_1_638848218556433423.png"
-        img_url = f"{server_base_url}/media/azure/unidades/{blob_name}"
+        img_url = generate_blob_sas_url("unidades", blob_name) or f"{server_base_url}/media/azure/unidades/{blob_name}"
         body = [
             _build_teams_header("🌧️ Reporte de Lluvias 24 Horas (6am a 6am)", "Red Hidrometeorológica CFE Grijalva"),
             {
@@ -507,7 +545,7 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
     # 8. Reporte de Lluvias Parcial (Opción 12)
     if cmd in ["12"] or any(k in cmd for k in ["lluvia parcial", "lluvias parcial", "parcial", "opcion 12", "opción 12"]) or re.match(r"^12(\D|$)", cmd):
         blob_name = "reporte_lluvia_1_2_638848218556433423.png"
-        img_url = f"{server_base_url}/media/azure/unidades/{blob_name}"
+        img_url = generate_blob_sas_url("unidades", blob_name) or f"{server_base_url}/media/azure/unidades/{blob_name}"
         body = [
             _build_teams_header("🌧️ Reporte de Lluvias Parcial (6am a hora actual)", "Red Hidrometeorológica CFE Grijalva"),
             {
