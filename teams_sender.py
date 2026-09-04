@@ -38,7 +38,7 @@ def send_cyclone_teams(cyclone_data, docx_path=None):
     filename = os.path.basename(docx_path) if docx_path else ""
     download_url = f"{server_base_url}/download/{filename}" if filename else server_base_url
 
-    # Construir elementos visuales de la Adaptive Card
+    # Construir elementos visuales de la Adaptive Card compatible con Microsoft Teams (v1.3)
     card_body = [
         # Encabezado institucional
         {
@@ -95,7 +95,7 @@ def send_cyclone_teams(cyclone_data, docx_path=None):
         # Titular / Síntesis
         {
             "type": "Container",
-            "style": "warning",
+            "style": "emphasis",
             "items": [
                 {
                     "type": "TextBlock",
@@ -135,13 +135,13 @@ def send_cyclone_teams(cyclone_data, docx_path=None):
     card_body.append({
         "type": "FactSet",
         "facts": [
-            {"title": "⏱️ Hora Local/GMT:", "value": cond.get("hora_local_gmt", "--")},
+            {"title": "⏱️ Hora Local/GMT:", "value": str(cond.get("hora_local_gmt", "--"))},
             {"title": "📍 Ubicación:", "value": ubicacion_str},
-            {"title": "📏 Distancia a costa:", "value": cond.get("distancia_costa", "--")},
-            {"title": "🧭 Desplazamiento:", "value": cond.get("desplazamiento", "--")},
+            {"title": "📏 Distancia a costa:", "value": str(cond.get("distancia_costa", "--"))},
+            {"title": "🧭 Desplazamiento:", "value": str(cond.get("desplazamiento", "--"))},
             {"title": "💨 Vientos/Rachas:", "value": vientos_str},
             {"title": "🌀 Presión Central:", "value": f"{cond.get('presion_minima', '--')} hPa"},
-            {"title": "🌧️ Pronóstico Lluvia:", "value": cond.get("pronostico_lluvia", "Sin efectos")}
+            {"title": "🌧️ Pronóstico Lluvia:", "value": str(cond.get("pronostico_lluvia", "Sin efectos"))}
         ]
     })
 
@@ -197,14 +197,15 @@ def send_cyclone_teams(cyclone_data, docx_path=None):
     if proximo:
         card_body.append({
             "type": "Container",
-            "style": "accent",
+            "style": "emphasis",
             "spacing": "Medium",
             "items": [
                 {
                     "type": "TextBlock",
                     "text": f"🔔 **{proximo}**",
                     "wrap": True,
-                    "color": "Accent"
+                    "weight": "Bolder",
+                    "color": "Attention"
                 }
             ]
         })
@@ -233,19 +234,23 @@ def send_cyclone_teams(cyclone_data, docx_path=None):
         }
     ]
 
+    adaptive_card = {
+        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+        "type": "AdaptiveCard",
+        "version": "1.3",
+        "body": card_body,
+        "actions": actions
+    }
+
+    # Payload estándar compatible con flujos de Workflows / Power Automate / Teams Webhook
     payload = {
         "type": "message",
+        "summary": f"Aviso de Ciclón Tropical CFE: {sistema} ({cuenca})",
         "attachments": [
             {
                 "contentType": "application/vnd.microsoft.card.adaptive",
                 "contentUrl": None,
-                "content": {
-                    "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-                    "type": "AdaptiveCard",
-                    "version": "1.4",
-                    "body": card_body,
-                    "actions": actions
-                }
+                "content": adaptive_card
             }
         ]
     }
