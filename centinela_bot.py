@@ -121,14 +121,11 @@ def is_volver(msg):
     return msg.strip().lower() in ["volver", "menu", "menú", "inicio", "salir", "0"]
 
 
-def process_with_ai(from_jid, question):
-    """Procesa una pregunta con DeepSeek / OpenAI."""
+def ask_deepseek(question):
+    """Consulta técnica especializada con DeepSeek / OpenAI."""
     api_key = DEEPSEEK_API_KEY or os.getenv("OPENAI_API_KEY", "")
     if not api_key:
-        send_wa_text(from_jid, "⚠️ El motor de IA no tiene clave configurada en las variables de entorno.")
-        return
-        
-    send_wa_text(from_jid, "🤖 *Analizando tu consulta técnica con IA...*\nEsto puede tardar unos segundos.")
+        return "⚠️ El motor de IA no tiene clave configurada en las variables de entorno."
     try:
         headers = {
             "Authorization": f"Bearer {api_key}",
@@ -151,19 +148,24 @@ Finaliza firmando como: *Centinela SPH Grijalva*.
         }
         res = requests.post("https://api.deepseek.com/v1/chat/completions", json=payload, headers=headers, timeout=30)
         if res.status_code == 200:
-            ai_text = res.json()["choices"][0]["message"]["content"]
-            reply = f"🤖 *Análisis Técnico Centinela:*\n\n{ai_text}\n\n💡 _Escribe 'volver' para regresar al menú principal._"
-            send_wa_text(from_jid, reply)
+            return res.json()["choices"][0]["message"]["content"]
         else:
-            send_wa_text(from_jid, "⚠️ No fue posible conectar con el motor de IA en este momento.\nEscribe 'volver' para regresar al menú.")
+            return "⚠️ No fue posible conectar con el motor de IA en este momento."
     except Exception as e:
-        send_wa_text(from_jid, "❌ Ocurrió un error al procesar tu consulta con IA. Escribe 'volver' para regresar al menú.")
+        return f"❌ Error al consultar con IA: {e}"
+
+
+def process_with_ai(from_jid, question):
+    """Procesa una pregunta con DeepSeek / OpenAI para WhatsApp."""
+    send_wa_text(from_jid, "🤖 *Analizando tu consulta técnica con IA...*\nEsto puede tardar unos segundos.")
+    ai_text = ask_deepseek(question)
+    reply = f"🤖 *Análisis Técnico Centinela:*\n\n{ai_text}\n\n💡 _Escribe 'volver' para regresar al menú principal._"
+    send_wa_text(from_jid, reply)
 
 
 def handle_incoming_whatsapp_message(payload):
     """
-    Controlador principal equivalente al WhatsappController de C# para procesar
-    todos los comandos del menú de Centinela.
+    Controlador principal para procesar todos los comandos del menú de Centinela en WhatsApp.
     """
     from_jid = payload.get("from")
     text = (payload.get("text") or "").strip()
@@ -264,3 +266,286 @@ def handle_incoming_whatsapp_message(payload):
     else:
         # Responder con el menú principal
         send_wa_text(from_jid, get_menu_text())
+
+
+# ==========================================
+# MÓDULO CENTINELA PARA MICROSOFT TEAMS
+# ==========================================
+
+def _wrap_teams_card(card_body, actions=None):
+    """Envuelve el cuerpo en una Adaptive Card v1.3 lista para Microsoft Teams."""
+    card = {
+        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+        "type": "AdaptiveCard",
+        "version": "1.3",
+        "body": card_body
+    }
+    if actions:
+        card["actions"] = actions
+
+    return {
+        "type": "message",
+        "attachments": [
+            {
+                "contentType": "application/vnd.microsoft.card.adaptive",
+                "contentUrl": None,
+                "content": card
+            }
+        ]
+    }
+
+
+def _build_teams_header(title="🤖 Centinela SPH Grijalva", subtitle="Subgerencia de Producción Hidroeléctrica Grijalva • CFE"):
+    return {
+        "type": "Container",
+        "style": "emphasis",
+        "items": [
+            {
+                "type": "TextBlock",
+                "text": title,
+                "weight": "Bolder",
+                "size": "Medium",
+                "color": "Dark"
+            },
+            {
+                "type": "TextBlock",
+                "text": subtitle,
+                "isSubtle": True,
+                "size": "Small",
+                "spacing": "None"
+            }
+        ]
+    }
+
+
+def _build_teams_footer():
+    return {
+        "type": "TextBlock",
+        "text": "Departamento de Hidrometeorología • Gerencia de Ingeniería Civil • CFE Generación",
+        "isSubtle": True,
+        "size": "Small",
+        "horizontalAlignment": "Center",
+        "spacing": "Medium"
+    }
+
+
+def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-ciclones.onrender.com"):
+    """
+    Controlador para procesar mensajes y comandos dirigidos a Centinela desde Microsoft Teams
+    (Outgoing Webhooks y Flujos de Power Automate / Workflows).
+    """
+    import re
+    server_base_url = (server_base_url or "https://cfe-avisos-ciclones.onrender.com").rstrip("/")
+    raw_text = (payload.get("text") or "").strip()
+    
+    # Limpiar menciones de Teams <at>Centinela</at> y entidades HTML
+    clean_text = re.sub(r"<[^>]+>", "", raw_text).replace("&nbsp;", " ").strip()
+    user_name = payload.get("from", {}).get("name", "Ingeniero(a)")
+    cmd = clean_text.lower()
+
+    # 1. Menú principal
+    if not clean_text or cmd in ["menu", "menú", "hola", "help", "ayuda", "inicio", "0", "opciones"]:
+        body = [
+            _build_teams_header("🤖 Centinela SPH Grijalva — Menú de Consultas"),
+            {
+                "type": "TextBlock",
+                "text": f"Hola **{user_name}**, estoy a tu disposición con la información técnica del Sistema Hidroeléctrico del Río Grijalva:",
+                "wrap": True,
+                "spacing": "Medium"
+            },
+            {
+                "type": "FactSet",
+                "facts": [
+                    {"title": "1️⃣ o 'unidades':", "value": "Reporte de Unidades Generadoras"},
+                    {"title": "2️⃣ o 'power':", "value": "Power Monitoring en tiempo real"},
+                    {"title": "3️⃣ o 'potencia':", "value": "Gráfica de Potencia Actual"},
+                    {"title": "4️⃣ o 'embalses':", "value": "Condición de los Embalses (Niveles/Cotas)"},
+                    {"title": "5️⃣ o 'cuenca':", "value": "Aportaciones por Cuenca Propia"},
+                    {"title": "7️⃣ o 'disponibilidad':", "value": "Reporte de Disponibilidad Hidroeléctrica"},
+                    {"title": "11 o 'lluvias 24h':", "value": "Reporte de Lluvias 24h (6am a 6am)"},
+                    {"title": "12 o 'lluvias parcial':", "value": "Reporte de Lluvias acumulado parcial"},
+                    {"title": "🤖 Consulta Técnica IA:", "value": "Escribe directamente tu pregunta con @Centinela"}
+                ]
+            },
+            {
+                "type": "Container",
+                "style": "emphasis",
+                "items": [
+                    {
+                        "type": "TextBlock",
+                        "text": "💡 **Tip de uso:** Escribe `@Centinela 4` para ver embalses o haz preguntas directas como: `@Centinela ¿cuál es la capacidad útil de Angostura?`",
+                        "wrap": True,
+                        "size": "Small"
+                    }
+                ]
+            },
+            _build_teams_footer()
+        ]
+        return _wrap_teams_card(body)
+
+    # 2. Reporte de Unidades (Opción 1)
+    if cmd in ["1", "unidades", "unidad"]:
+        blob_name = "9c8a7f42-3d91-4e01-a3fa-0d2e5b1c6f7d.png"
+        img_url = f"{server_base_url}/media/azure/unidades/{blob_name}"
+        body = [
+            _build_teams_header("📊 Reporte de Unidades Generadoras", "Sistema de Presas del Río Grijalva"),
+            {
+                "type": "Image",
+                "url": img_url,
+                "altText": "Reporte de Unidades",
+                "size": "Auto"
+            },
+            _build_teams_footer()
+        ]
+        actions = [{"type": "Action.OpenUrl", "title": "🔍 Ver Imagen Completa", "url": img_url}]
+        return _wrap_teams_card(body, actions)
+
+    # 3. Power Monitoring (Opción 2)
+    if cmd in ["2", "power", "monitoring"]:
+        blob_name = "6f3b2c91-91df-41b6-9a1e-c3f0d0c8e24a.png"
+        img_url = f"{server_base_url}/media/azure/unidades/{blob_name}"
+        body = [
+            _build_teams_header("📊 Power Monitoring en Tiempo Real", "Monitoreo Eléctrico CFE SPH"),
+            {
+                "type": "Image",
+                "url": img_url,
+                "altText": "Power Monitoring",
+                "size": "Auto"
+            },
+            _build_teams_footer()
+        ]
+        actions = [{"type": "Action.OpenUrl", "title": "🔍 Ver Imagen Completa", "url": img_url}]
+        return _wrap_teams_card(body, actions)
+
+    # 4. Gráfica de Potencia (Opción 3)
+    if cmd in ["3", "potencia", "grafica potencia"]:
+        blob_name = "b7e1f9c3-8a2d-4f5d-9c3a-7f1f6e7a2c01.png"
+        img_url = f"{server_base_url}/media/azure/unidades/{blob_name}"
+        body = [
+            _build_teams_header("📊 Gráfica de Potencia Actual", "Generación Total MW"),
+            {
+                "type": "Image",
+                "url": img_url,
+                "altText": "Gráfica de Potencia",
+                "size": "Auto"
+            },
+            _build_teams_footer()
+        ]
+        actions = [{"type": "Action.OpenUrl", "title": "🔍 Ver Imagen Completa", "url": img_url}]
+        return _wrap_teams_card(body, actions)
+
+    # 5. Condición de Embalses (Opción 4)
+    if cmd in ["4", "embalses", "embalse", "presas", "niveles"]:
+        blob_name = "e1a5f734-9c2e-4b3b-8d5a-6f7e1d2c9b8f.png"
+        img_url = f"{server_base_url}/media/azure/unidades/{blob_name}"
+        body = [
+            _build_teams_header("📊 Condición de los Embalses", "Niveles, Cotas, Almacenamientos y Gastos"),
+            {
+                "type": "Image",
+                "url": img_url,
+                "altText": "Condición de Embalses",
+                "size": "Auto"
+            },
+            _build_teams_footer()
+        ]
+        actions = [{"type": "Action.OpenUrl", "title": "🔍 Ver Imagen Completa", "url": img_url}]
+        return _wrap_teams_card(body, actions)
+
+    # 6. Aportaciones por Cuenca (Opción 5)
+    if cmd in ["5", "cuenca", "aportaciones"]:
+        blob_name = "d42f3e19-b89c-4f02-90d4-3e7f4a6d2c01.png"
+        img_url = f"{server_base_url}/media/azure/unidades/{blob_name}"
+        body = [
+            _build_teams_header("📊 Aportaciones por Cuenca Propia", "Gastos de Entrada m³/s"),
+            {
+                "type": "Image",
+                "url": img_url,
+                "altText": "Aportaciones por Cuenca",
+                "size": "Auto"
+            },
+            _build_teams_footer()
+        ]
+        actions = [{"type": "Action.OpenUrl", "title": "🔍 Ver Imagen Completa", "url": img_url}]
+        return _wrap_teams_card(body, actions)
+
+    # 7. Reporte de Lluvias 24h (Opción 11)
+    if cmd in ["11", "lluvia 24", "lluvias 24", "lluvias 24h"]:
+        blob_name = "reporte_lluvia_1_1_638848218556433423.png"
+        img_url = f"{server_base_url}/media/azure/unidades/{blob_name}"
+        body = [
+            _build_teams_header("🌧️ Reporte de Lluvias 24 Horas (6am a 6am)", "Red Hidrometeorológica CFE Grijalva"),
+            {
+                "type": "Image",
+                "url": img_url,
+                "altText": "Lluvias 24h",
+                "size": "Auto"
+            },
+            _build_teams_footer()
+        ]
+        actions = [{"type": "Action.OpenUrl", "title": "🔍 Ver Imagen Completa", "url": img_url}]
+        return _wrap_teams_card(body, actions)
+
+    # 8. Reporte de Lluvias Parcial (Opción 12)
+    if cmd in ["12", "lluvia parcial", "lluvias parcial"]:
+        blob_name = "reporte_lluvia_1_2_638848218556433423.png"
+        img_url = f"{server_base_url}/media/azure/unidades/{blob_name}"
+        body = [
+            _build_teams_header("🌧️ Reporte de Lluvias Parcial (6am a hora actual)", "Red Hidrometeorológica CFE Grijalva"),
+            {
+                "type": "Image",
+                "url": img_url,
+                "altText": "Lluvias Parcial",
+                "size": "Auto"
+            },
+            _build_teams_footer()
+        ]
+        actions = [{"type": "Action.OpenUrl", "title": "🔍 Ver Imagen Completa", "url": img_url}]
+        return _wrap_teams_card(body, actions)
+
+    # 9. Reporte de Disponibilidad (Opción 7)
+    if cmd in ["7", "disponibilidad"]:
+        report_text = get_azure_blob_text("reporte-unidades", "telegram_report.txt")
+        body = [
+            _build_teams_header("📋 Reporte de Disponibilidad Hidroeléctrica"),
+            {
+                "type": "TextBlock",
+                "text": report_text or "⚠️ No se encontró el archivo de reporte de disponibilidad en este momento.",
+                "wrap": True,
+                "spacing": "Medium"
+            },
+            _build_teams_footer()
+        ]
+        return _wrap_teams_card(body)
+
+    # 10. Consulta con Inteligencia Artificial (Opción 6 o preguntas abiertas)
+    question = clean_text
+    if cmd.startswith("6"):
+        question = clean_text[1:].strip() or "¿Cómo se encuentra la operación del sistema Grijalva?"
+    elif cmd.startswith("ia "):
+        question = clean_text[3:].strip()
+
+    ai_reply = ask_deepseek(question)
+    body = [
+        _build_teams_header("🤖 Centinela IA — Análisis Técnico Hidroeléctrico"),
+        {
+            "type": "Container",
+            "style": "emphasis",
+            "items": [
+                {
+                    "type": "TextBlock",
+                    "text": f"**Pregunta:** _{question}_",
+                    "wrap": True,
+                    "color": "Dark"
+                }
+            ]
+        },
+        {
+            "type": "TextBlock",
+            "text": ai_reply,
+            "wrap": True,
+            "spacing": "Medium"
+        },
+        _build_teams_footer()
+    ]
+    return _wrap_teams_card(body)
+

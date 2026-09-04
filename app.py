@@ -18,7 +18,7 @@ from email_sender import send_cyclone_email, send_whatsapp_disconnected_alert
 from telegram_sender import send_cyclone_telegram
 from whatsapp_sender import send_cyclone_whatsapp
 from teams_sender import send_cyclone_teams
-from centinela_bot import handle_incoming_whatsapp_message
+from centinela_bot import handle_incoming_whatsapp_message, handle_incoming_teams_message, get_azure_blob_bytes
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
@@ -377,6 +377,30 @@ def api_cyclones():
 @app.route("/download/<path:filename>")
 def download(filename):
     return send_from_directory(REPORTS_DIR, filename, as_attachment=True)
+
+
+@app.route("/api/teams/webhook", methods=["POST"])
+@app.route("/api/teams/centinela", methods=["POST"])
+def teams_centinela_webhook():
+    """Webhook para recibir comandos de Microsoft Teams (Outgoing Webhook y Workflows)."""
+    payload = request.get_json(silent=True) or {}
+    server_base_url = os.getenv("SERVER_PUBLIC_URL", request.host_url).rstrip("/")
+    response_card = handle_incoming_teams_message(payload, server_base_url=server_base_url)
+    return jsonify(response_card), 200
+
+
+@app.route("/media/azure/<container>/<blob_name>", methods=["GET"])
+def media_azure_blob(container, blob_name):
+    """Sirve imágenes y archivos descargados dinámicamente de Azure Blob Storage."""
+    data = get_azure_blob_bytes(container, blob_name)
+    if not data:
+        return "Blob not found", 404
+    mimetype = "image/png"
+    if blob_name.endswith(".jpg") or blob_name.endswith(".jpeg"):
+        mimetype = "image/jpeg"
+    elif blob_name.endswith(".txt"):
+        mimetype = "text/plain; charset=utf-8"
+    return Response(data, mimetype=mimetype)
 
 
 @app.route("/health")
