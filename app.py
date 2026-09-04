@@ -383,6 +383,24 @@ def download(filename):
 @app.route("/api/teams/centinela", methods=["POST"])
 def teams_centinela_webhook():
     """Webhook para recibir comandos de Microsoft Teams (Outgoing Webhook y Workflows)."""
+    # Verificación de seguridad opcional con el Token HMAC de Teams
+    teams_token = os.getenv("TEAMS_OUTGOING_TOKEN", "").strip()
+    if teams_token:
+        import hmac
+        import hashlib
+        import base64
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header:
+            try:
+                received_sig = auth_header.split(" ")[-1]
+                decoded_key = base64.b64decode(teams_token)
+                expected_sig = base64.b64encode(hmac.new(decoded_key, request.get_data(), hashlib.sha256).digest()).decode("utf-8")
+                if not hmac.compare_digest(received_sig, expected_sig):
+                    logging.warning("[TEAMS] Firma HMAC inválida en la petición.")
+                    return jsonify({"type": "message", "text": "⚠️ Error de autenticación: Firma HMAC no coincide."}), 401
+            except Exception as e:
+                logging.error(f"[TEAMS] Error al validar HMAC: {e}")
+
     payload = request.get_json(silent=True) or {}
     server_base_url = os.getenv("SERVER_PUBLIC_URL", request.host_url).rstrip("/")
     response_card = handle_incoming_teams_message(payload, server_base_url=server_base_url)
