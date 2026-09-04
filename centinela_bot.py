@@ -22,13 +22,21 @@ AZURE_CONTAINER = os.getenv("AZURE_STORAGE_CONTAINER", "unidades")
 _D_DEF = [81, 65, 87, 83, 82, 88, 78, 89, 88, 76, 88, 79, 88, 89, 89, 94, 94, 89, 90, 89, 91, 88, 88, 90, 83, 91, 88, 82, 84, 90, 91, 88, 88, 89, 88, 90]
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY") or "".join(chr(c ^ 42) for c in _D_DEF)
 
-# Estado en memoria
+# Estado y caché en memoria
 mensajes_procesados = {}
 usuarios_en_modo_ia = {}
+_blob_cache = {}
 
 
 def get_azure_blob_bytes(container, blob_name):
-    """Descarga un blob directamente desde Azure Blob Storage usando la API REST con SharedKey."""
+    """Descarga un blob directamente desde Azure Blob Storage con caché en memoria (2 min)."""
+    cache_key = f"{container}/{blob_name}"
+    now = time.time()
+    if cache_key in _blob_cache:
+        cached_data, cached_time = _blob_cache[cache_key]
+        if now - cached_time < 120:
+            return cached_data
+
     key = AZURE_KEY or os.getenv("AZURE_KEY", "")
     if not key:
         logging.error("[AZURE] AZURE_STORAGE_KEY no configurada.")
@@ -53,6 +61,7 @@ def get_azure_blob_bytes(container, blob_name):
         url = f'https://{AZURE_ACCOUNT}.blob.core.windows.net/{container}/{blob_name}'
         r = requests.get(url, headers=headers, timeout=20)
         if r.status_code == 200:
+            _blob_cache[cache_key] = (r.content, now)
             return r.content
         else:
             logging.error(f"[AZURE] Error {r.status_code} al descargar {blob_name}: {r.text}")
@@ -348,7 +357,7 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
     cmd = clean_text.lower()
 
     # 1. Menú principal
-    if not clean_text or cmd in ["menu", "menú", "hola", "help", "ayuda", "inicio", "0", "opciones"]:
+    if not clean_text or cmd in ["menu", "menú", "hola", "help", "ayuda", "inicio", "0", "opciones", "start"]:
         body = [
             _build_teams_header("🤖 Centinela SPH Grijalva — Menú de Consultas"),
             {
@@ -388,7 +397,7 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
         return _wrap_teams_card(body)
 
     # 2. Reporte de Unidades (Opción 1)
-    if cmd in ["1", "unidades", "unidad"]:
+    if cmd in ["1", "01"] or any(k in cmd for k in ["unidad", "unidades", "reporte de unidades", "opcion 1", "opción 1"]) or re.match(r"^1(\D|$)", cmd):
         blob_name = "9c8a7f42-3d91-4e01-a3fa-0d2e5b1c6f7d.png"
         img_url = f"{server_base_url}/media/azure/unidades/{blob_name}"
         body = [
@@ -397,7 +406,8 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
                 "type": "Image",
                 "url": img_url,
                 "altText": "Reporte de Unidades",
-                "size": "Auto"
+                "size": "Auto",
+                "selectAction": {"type": "Action.OpenUrl", "url": img_url}
             },
             _build_teams_footer()
         ]
@@ -405,7 +415,7 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
         return _wrap_teams_card(body, actions)
 
     # 3. Power Monitoring (Opción 2)
-    if cmd in ["2", "power", "monitoring"]:
+    if cmd in ["2", "02"] or any(k in cmd for k in ["power", "monitoring", "powermonitoring", "power monitoring", "opcion 2", "opción 2"]) or re.match(r"^2(\D|$)", cmd):
         blob_name = "6f3b2c91-91df-41b6-9a1e-c3f0d0c8e24a.png"
         img_url = f"{server_base_url}/media/azure/unidades/{blob_name}"
         body = [
@@ -414,7 +424,8 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
                 "type": "Image",
                 "url": img_url,
                 "altText": "Power Monitoring",
-                "size": "Auto"
+                "size": "Auto",
+                "selectAction": {"type": "Action.OpenUrl", "url": img_url}
             },
             _build_teams_footer()
         ]
@@ -422,7 +433,7 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
         return _wrap_teams_card(body, actions)
 
     # 4. Gráfica de Potencia (Opción 3)
-    if cmd in ["3", "potencia", "grafica potencia"]:
+    if cmd in ["3", "03"] or any(k in cmd for k in ["potencia", "grafica potencia", "gráfica potencia", "opcion 3", "opción 3"]) or re.match(r"^3(\D|$)", cmd):
         blob_name = "b7e1f9c3-8a2d-4f5d-9c3a-7f1f6e7a2c01.png"
         img_url = f"{server_base_url}/media/azure/unidades/{blob_name}"
         body = [
@@ -431,7 +442,8 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
                 "type": "Image",
                 "url": img_url,
                 "altText": "Gráfica de Potencia",
-                "size": "Auto"
+                "size": "Auto",
+                "selectAction": {"type": "Action.OpenUrl", "url": img_url}
             },
             _build_teams_footer()
         ]
@@ -439,7 +451,7 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
         return _wrap_teams_card(body, actions)
 
     # 5. Condición de Embalses (Opción 4)
-    if cmd in ["4", "embalses", "embalse", "presas", "niveles"]:
+    if cmd in ["4", "04"] or any(k in cmd for k in ["embalse", "embalses", "presa", "presas", "nivel", "niveles", "cota", "cotas", "opcion 4", "opción 4"]) or re.match(r"^4(\D|$)", cmd):
         blob_name = "e1a5f734-9c2e-4b3b-8d5a-6f7e1d2c9b8f.png"
         img_url = f"{server_base_url}/media/azure/unidades/{blob_name}"
         body = [
@@ -448,7 +460,8 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
                 "type": "Image",
                 "url": img_url,
                 "altText": "Condición de Embalses",
-                "size": "Auto"
+                "size": "Auto",
+                "selectAction": {"type": "Action.OpenUrl", "url": img_url}
             },
             _build_teams_footer()
         ]
@@ -456,7 +469,7 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
         return _wrap_teams_card(body, actions)
 
     # 6. Aportaciones por Cuenca (Opción 5)
-    if cmd in ["5", "cuenca", "aportaciones"]:
+    if cmd in ["5", "05"] or any(k in cmd for k in ["cuenca", "aportacion", "aportaciones", "aportación", "opcion 5", "opción 5"]) or re.match(r"^5(\D|$)", cmd):
         blob_name = "d42f3e19-b89c-4f02-90d4-3e7f4a6d2c01.png"
         img_url = f"{server_base_url}/media/azure/unidades/{blob_name}"
         body = [
@@ -465,7 +478,8 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
                 "type": "Image",
                 "url": img_url,
                 "altText": "Aportaciones por Cuenca",
-                "size": "Auto"
+                "size": "Auto",
+                "selectAction": {"type": "Action.OpenUrl", "url": img_url}
             },
             _build_teams_footer()
         ]
@@ -473,7 +487,7 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
         return _wrap_teams_card(body, actions)
 
     # 7. Reporte de Lluvias 24h (Opción 11)
-    if cmd in ["11", "lluvia 24", "lluvias 24", "lluvias 24h"]:
+    if cmd in ["11"] or any(k in cmd for k in ["lluvia 24", "lluvias 24", "lluvia 24h", "lluvias 24h", "24 horas", "opcion 11", "opción 11"]) or re.match(r"^11(\D|$)", cmd):
         blob_name = "reporte_lluvia_1_1_638848218556433423.png"
         img_url = f"{server_base_url}/media/azure/unidades/{blob_name}"
         body = [
@@ -482,7 +496,8 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
                 "type": "Image",
                 "url": img_url,
                 "altText": "Lluvias 24h",
-                "size": "Auto"
+                "size": "Auto",
+                "selectAction": {"type": "Action.OpenUrl", "url": img_url}
             },
             _build_teams_footer()
         ]
@@ -490,7 +505,7 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
         return _wrap_teams_card(body, actions)
 
     # 8. Reporte de Lluvias Parcial (Opción 12)
-    if cmd in ["12", "lluvia parcial", "lluvias parcial"]:
+    if cmd in ["12"] or any(k in cmd for k in ["lluvia parcial", "lluvias parcial", "parcial", "opcion 12", "opción 12"]) or re.match(r"^12(\D|$)", cmd):
         blob_name = "reporte_lluvia_1_2_638848218556433423.png"
         img_url = f"{server_base_url}/media/azure/unidades/{blob_name}"
         body = [
@@ -499,7 +514,8 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
                 "type": "Image",
                 "url": img_url,
                 "altText": "Lluvias Parcial",
-                "size": "Auto"
+                "size": "Auto",
+                "selectAction": {"type": "Action.OpenUrl", "url": img_url}
             },
             _build_teams_footer()
         ]
@@ -507,7 +523,7 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
         return _wrap_teams_card(body, actions)
 
     # 9. Reporte de Disponibilidad (Opción 7)
-    if cmd in ["7", "disponibilidad"]:
+    if cmd in ["7", "07"] or any(k in cmd for k in ["disponibilidad", "disponible", "opcion 7", "opción 7"]) or re.match(r"^7(\D|$)", cmd):
         report_text = get_azure_blob_text("reporte-unidades", "telegram_report.txt")
         body = [
             _build_teams_header("📋 Reporte de Disponibilidad Hidroeléctrica"),
