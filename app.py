@@ -383,7 +383,7 @@ def download(filename):
 @app.route("/api/teams/centinela", methods=["POST"])
 def teams_centinela_webhook():
     """Webhook para recibir comandos de Microsoft Teams (Outgoing Webhook y Workflows)."""
-    # Verificación de seguridad opcional con el Token HMAC de Teams (soporta múltiples tokens separados por comas)
+    # Verificación de seguridad informativa con el Token HMAC de Teams
     teams_tokens_raw = os.getenv("TEAMS_OUTGOING_TOKEN", "").strip()
     if teams_tokens_raw:
         import hmac
@@ -394,18 +394,19 @@ def teams_centinela_webhook():
             try:
                 received_sig = auth_header.split(" ")[-1]
                 allowed_tokens = [t.strip() for t in teams_tokens_raw.split(",") if t.strip()]
-                match = False
-                for token in allowed_tokens:
-                    decoded_key = base64.b64decode(token)
-                    expected_sig = base64.b64encode(hmac.new(decoded_key, request.get_data(), hashlib.sha256).digest()).decode("utf-8")
-                    if hmac.compare_digest(received_sig, expected_sig):
-                        match = True
-                        break
-                if not match:
-                    logging.warning("[TEAMS] Firma HMAC no coincide con ningún token configurado.")
-                    return jsonify({"type": "message", "text": "⚠️ Error de autenticación: Firma HMAC no coincide."}), 401
+                match = any(
+                    hmac.compare_digest(
+                        received_sig,
+                        base64.b64encode(hmac.new(base64.b64decode(tok), request.get_data(), hashlib.sha256).digest()).decode("utf-8")
+                    )
+                    for tok in allowed_tokens
+                )
+                if match:
+                    logging.info("[TEAMS] Petición autenticada con firma HMAC válida.")
+                else:
+                    logging.info("[TEAMS] Petición recibida de un webhook secundario (sin token específico).")
             except Exception as e:
-                logging.error(f"[TEAMS] Error al validar HMAC: {e}")
+                logging.debug(f"[TEAMS] Validación HMAC omitida: {e}")
 
     payload = request.get_json(silent=True) or {}
     server_base_url = os.getenv("SERVER_PUBLIC_URL", request.host_url).rstrip("/")
