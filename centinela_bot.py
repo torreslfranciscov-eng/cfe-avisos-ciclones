@@ -390,7 +390,7 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
     clean_text = re.sub(r"\s+", " ", clean_text).strip()
     
     # 2. Remover el prefijo del nombre del bot si viene en el texto (ej. "centinelaSph 1", "Centinela 1", "bot embalses")
-    clean_text = re.sub(r"^(centinelasph|centinela[\w\s]*|bot)\b[\s,:]*", "", clean_text, flags=re.IGNORECASE).strip()
+    clean_text = re.sub(r"^@?(centinelasph|centinela|bot)\b[\s,:]*", "", clean_text, flags=re.IGNORECASE).strip()
     user_name = payload.get("from", {}).get("name", "Ingeniero(a)")
     cmd = clean_text.lower()
 
