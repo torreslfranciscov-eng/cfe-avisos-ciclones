@@ -383,9 +383,9 @@ def download(filename):
 @app.route("/api/teams/centinela", methods=["POST"])
 def teams_centinela_webhook():
     """Webhook para recibir comandos de Microsoft Teams (Outgoing Webhook y Workflows)."""
-    # Verificación de seguridad opcional con el Token HMAC de Teams
-    teams_token = os.getenv("TEAMS_OUTGOING_TOKEN", "").strip()
-    if teams_token:
+    # Verificación de seguridad opcional con el Token HMAC de Teams (soporta múltiples tokens separados por comas)
+    teams_tokens_raw = os.getenv("TEAMS_OUTGOING_TOKEN", "").strip()
+    if teams_tokens_raw:
         import hmac
         import hashlib
         import base64
@@ -393,10 +393,16 @@ def teams_centinela_webhook():
         if auth_header:
             try:
                 received_sig = auth_header.split(" ")[-1]
-                decoded_key = base64.b64decode(teams_token)
-                expected_sig = base64.b64encode(hmac.new(decoded_key, request.get_data(), hashlib.sha256).digest()).decode("utf-8")
-                if not hmac.compare_digest(received_sig, expected_sig):
-                    logging.warning("[TEAMS] Firma HMAC inválida en la petición.")
+                allowed_tokens = [t.strip() for t in teams_tokens_raw.split(",") if t.strip()]
+                match = False
+                for token in allowed_tokens:
+                    decoded_key = base64.b64decode(token)
+                    expected_sig = base64.b64encode(hmac.new(decoded_key, request.get_data(), hashlib.sha256).digest()).decode("utf-8")
+                    if hmac.compare_digest(received_sig, expected_sig):
+                        match = True
+                        break
+                if not match:
+                    logging.warning("[TEAMS] Firma HMAC no coincide con ningún token configurado.")
                     return jsonify({"type": "message", "text": "⚠️ Error de autenticación: Firma HMAC no coincide."}), 401
             except Exception as e:
                 logging.error(f"[TEAMS] Error al validar HMAC: {e}")
