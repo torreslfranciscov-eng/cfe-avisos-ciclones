@@ -367,7 +367,7 @@ def _build_teams_header(title="🤖 Centinela SPH Grijalva", subtitle="Subgerenc
 def _build_teams_footer():
     return {
         "type": "TextBlock",
-        "text": "Departamento de Hidrometeorología • Gerencia de Ingeniería Civil • CFE Generación",
+        "text": "Subgerencia de Producción Hidroeléctrica Grijalva",
         "isSubtle": True,
         "size": "Small",
         "horizontalAlignment": "Center",
