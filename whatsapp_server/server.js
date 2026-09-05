@@ -11,7 +11,8 @@ const {
     default: makeWASocket,
     useMultiFileAuthState,
     DisconnectReason,
-    fetchLatestBaileysVersion
+    fetchLatestBaileysVersion,
+    Browsers
 } = require('@whiskeysockets/baileys');
 
 const app = express();
@@ -132,30 +133,35 @@ app.get('/status', (req, res) => {
     });
 });
 
+app.get('/qr/data', (req, res) => {
+    res.json({
+        status: clientStatus,
+        isReady: clientStatus === 'READY',
+        qr: latestQrDataUrl
+    });
+});
+
 app.get('/qr', (req, res) => {
     if (clientStatus === 'READY') {
         return res.send(`
             <!DOCTYPE html>
-            <html>
-            <head><title>WhatsApp CFE Conectado</title></head>
-            <body style="font-family: sans-serif; text-align: center; padding: 50px; background: #eef7f4;">
-                <h1 style="color: #1E5B4F;">✅ WhatsApp Conectado con Éxito</h1>
-                <p>El cliente de WhatsApp de CFE está listo para enviar avisos meteorológicos y responder como Centinela Bot.</p>
-                <p><a href="/groups" style="color: #1E5B4F; font-weight: bold;">Ver grupos disponibles</a></p>
-                <p style="margin-top: 30px;"><a href="/logout" style="color: #c0392b;">🔴 Cerrar sesión y desvincular número</a></p>
-            </body>
-            </html>
-        `);
-    }
-
-    if (!latestQrDataUrl) {
-        return res.send(`
-            <!DOCTYPE html>
-            <html>
-            <head><title>Generando QR...</title><meta http-equiv="refresh" content="3"></head>
-            <body style="font-family: sans-serif; text-align: center; padding: 50px;">
-                <h2>Iniciando cliente y generando código QR...</h2>
-                <p>Por favor espera 2 segundos...</p>
+            <html lang="es">
+            <head>
+                <meta charset="UTF-8">
+                <title>WhatsApp CFE Conectado</title>
+                <style>
+                    body { font-family: 'Segoe UI', sans-serif; text-align: center; padding: 50px; background: #eef7f4; }
+                    .card { background: white; border-radius: 12px; padding: 40px; display: inline-block; box-shadow: 0 4px 12px rgba(0,0,0,0.08); max-width: 480px; }
+                    .btn { display: inline-block; padding: 10px 20px; border-radius: 6px; text-decoration: none; font-weight: bold; margin-top: 15px; }
+                    .btn-danger { background: #e74c3c; color: white; }
+                </style>
+            </head>
+            <body>
+                <div class="card">
+                    <h1 style="color: #1E5B4F; margin-top: 0;">✅ WhatsApp Conectado</h1>
+                    <p style="color: #444;">El asistente <strong>Centinela SPH Grijalva</strong> está vinculado y listo para responder consultas y enviar avisos de ciclón.</p>
+                    <a href="/logout" class="btn btn-danger">🔴 Cerrar sesión / Vincular otro número</a>
+                </div>
             </body>
             </html>
         `);
@@ -163,23 +169,76 @@ app.get('/qr', (req, res) => {
 
     res.send(`
         <!DOCTYPE html>
-        <html>
+        <html lang="es">
         <head>
-            <title>Escanear QR WhatsApp CFE</title>
-            <meta http-equiv="refresh" content="5">
+            <meta charset="UTF-8">
+            <title>Vincular WhatsApp CFE Centinela</title>
             <style>
-                body { font-family: 'Segoe UI', sans-serif; text-align: center; padding: 40px; background: #f0f2f5; }
-                .card { background: white; border-radius: 12px; padding: 30px; display: inline-block; box-shadow: 0 4px 12px rgba(0,0,0,0.1); max-width: 400px; }
-                img { border-radius: 8px; margin: 20px 0; max-width: 280px; }
+                body { font-family: 'Segoe UI', sans-serif; text-align: center; padding: 40px; background: #f0f2f5; margin: 0; }
+                .card { background: white; border-radius: 16px; padding: 35px; display: inline-block; box-shadow: 0 8px 24px rgba(0,0,0,0.08); max-width: 420px; width: 90%; }
+                .title { color: #1E5B4F; margin-top: 0; font-size: 22px; }
+                .instructions { color: #555; font-size: 14px; line-height: 1.5; margin-bottom: 20px; text-align: left; background: #f8f9fa; padding: 12px 16px; border-radius: 8px; }
+                .instructions ol { margin: 0; padding-left: 20px; }
+                .qr-container { min-height: 280px; display: flex; align-items: center; justify-content: center; margin: 15px 0; background: #fafafa; border-radius: 12px; border: 1px dashed #ddd; }
+                .qr-img { max-width: 260px; width: 100%; border-radius: 8px; }
+                .status-badge { display: inline-block; padding: 6px 14px; border-radius: 20px; font-size: 13px; font-weight: 600; margin-top: 10px; background: #e3f2fd; color: #1976d2; }
+                .btn-restart { display: inline-block; margin-top: 20px; padding: 9px 18px; background: #6c757d; color: white; text-decoration: none; border-radius: 6px; font-size: 13px; }
+                .btn-restart:hover { background: #5a6268; }
             </style>
         </head>
         <body>
             <div class="card">
-                <h2 style="color: #1E5B4F;">📲 Vincular WhatsApp CFE</h2>
-                <p style="color: #666; font-size: 14px;">Abre WhatsApp en tu celular &gt; Dispositivos vinculados &gt; Vincular un dispositivo</p>
-                <img src="${latestQrDataUrl}" alt="Código QR WhatsApp" />
-                <p style="font-size: 12px; color: #888;">Esta página se actualiza automáticamente.</p>
+                <h2 class="title">📲 Vincular WhatsApp Centinela</h2>
+                <div class="instructions">
+                    <ol>
+                        <li>Abre WhatsApp en tu teléfono</li>
+                        <li>Toca <strong>Menú (⋮)</strong> o <strong>Configuración</strong></li>
+                        <li>Selecciona <strong>Dispositivos vinculados</strong></li>
+                        <li>Toca <strong>Vincular un dispositivo</strong> y apunta tu cámara al código:</li>
+                    </ol>
+                </div>
+
+                <div class="qr-container" id="qrBox">
+                    <p style="color: #888;" id="qrLoading">⏳ Generando código QR seguro...</p>
+                    <img id="qrImg" class="qr-img" style="display: none;" alt="Código QR" />
+                </div>
+
+                <div id="statusBadge" class="status-badge">🔄 Esperando escaneo...</div>
+
+                <div>
+                    <a href="/logout" class="btn-restart">🔄 Regenerar nuevo código QR</a>
+                </div>
             </div>
+
+            <script>
+                async function checkStatus() {
+                    try {
+                        const res = await fetch('/status');
+                        const data = await res.json();
+                        if (data.isReady || data.status === 'READY') {
+                            window.location.reload();
+                            return;
+                        }
+                        
+                        const resQr = await fetch('/qr/data');
+                        const dataQr = await resQr.json();
+                        const qrImg = document.getElementById('qrImg');
+                        const qrLoading = document.getElementById('qrLoading');
+                        const statusBadge = document.getElementById('statusBadge');
+                        
+                        if (dataQr.qr) {
+                            qrImg.src = dataQr.qr;
+                            qrImg.style.display = 'block';
+                            if (qrLoading) qrLoading.style.display = 'none';
+                            statusBadge.innerText = '📲 Código listo — Escanea con WhatsApp';
+                            statusBadge.style.background = '#e8f5e9';
+                            statusBadge.style.color = '#2e7d32';
+                        }
+                    } catch (e) {}
+                }
+                setInterval(checkStatus, 3000);
+                checkStatus();
+            </script>
         </body>
         </html>
     `);
@@ -511,7 +570,10 @@ async function startBaileys() {
         logger: pino({ level: 'silent' }),
         printQRInTerminal: true,
         auth: state,
-        browser: ['CFE Hidrometria', 'Chrome', '120.0.0.0']
+        browser: Browsers.macOS('Desktop'),
+        connectTimeoutMs: 60000,
+        keepAliveIntervalMs: 15000,
+        generateHighQualityLinkPreview: true
     });
 
     waSock.ev.on('creds.update', saveCreds);
