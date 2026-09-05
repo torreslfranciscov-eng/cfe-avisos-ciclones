@@ -3,7 +3,7 @@ services:
     name: cfe-avisos-ciclones
     runtime: python
     buildCommand: pip install -r requirements.txt && cd whatsapp_server && npm install --no-audit
-    startCommand: cd whatsapp_server && node server.js & cd /opt/render/project/src && gunicorn --bind 0.0.0.0:$PORT app:app
+    startCommand: chmod +x start.sh && ./start.sh
     envVars:
       - key: PORT
         value: 10000
