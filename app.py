@@ -364,6 +364,19 @@ def proxy_status():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+@app.route("/qr/data")
+@app.route("/qr/data/")
+@app.route("/qr-data")
+def proxy_qr_data():
+    """Proxy para consultar el código QR actual en JSON."""
+    openwa_url = os.getenv("OPENWA_SERVER_URL", "http://localhost:8085").rstrip("/")
+    try:
+        r = http_requests.get(f"{openwa_url}/qr/data", timeout=10)
+        return Response(r.content, status=r.status_code, content_type="application/json")
+    except Exception as e:
+        return jsonify({"isReady": False, "qr": None, "error": str(e)}), 500
+
+
 @app.route("/check", methods=["GET", "POST"])
 def check():
     force = request.args.get("force", "false").lower() == "true"

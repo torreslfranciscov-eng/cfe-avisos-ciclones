@@ -199,11 +199,13 @@ app.get('/qr', (req, res) => {
                 </div>
 
                 <div class="qr-container" id="qrBox">
-                    <p style="color: #888;" id="qrLoading">⏳ Generando código QR seguro...</p>
-                    <img id="qrImg" class="qr-img" style="display: none;" alt="Código QR" />
+                    <p style="color: #888; ${latestQrDataUrl ? 'display:none;' : ''}" id="qrLoading">⏳ Generando código QR seguro...</p>
+                    <img id="qrImg" class="qr-img" ${latestQrDataUrl ? `src="${latestQrDataUrl}" style="display:block;"` : 'style="display:none;"'} alt="Código QR WhatsApp" />
                 </div>
 
-                <div id="statusBadge" class="status-badge">🔄 Esperando escaneo...</div>
+                <div id="statusBadge" class="status-badge" ${latestQrDataUrl ? 'style="background:#e8f5e9;color:#2e7d32;"' : ''}>
+                    ${latestQrDataUrl ? '📲 Código listo — Escanea con WhatsApp' : '🔄 Esperando código...'}
+                </div>
 
                 <div>
                     <a href="/logout" class="btn-restart">🔄 Regenerar nuevo código QR</a>
