@@ -23,7 +23,8 @@ const PORT = process.env.WA_PORT || 8085;
 let waSock = null;
 let latestQrDataUrl = null;
 let clientStatus = 'INITIALIZING';
-let webhookUrl = process.env.WHATSAPP_WEBHOOK_URL || 'https://centinela.runasp.net/api/whatsapp/webhook';
+const FLASK_PORT = process.env.PORT || 10000;
+let webhookUrl = process.env.WHATSAPP_WEBHOOK_URL || `http://127.0.0.1:${FLASK_PORT}/api/whatsapp/webhook`;
 
 // Credenciales seguras de Azure Blob Storage
 const AZURE_ACCOUNT = process.env.AZURE_STORAGE_ACCOUNT || 'reportegeneracion';
