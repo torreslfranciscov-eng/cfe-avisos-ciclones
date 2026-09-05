@@ -561,101 +561,103 @@ async function procesarMensajeCentinela(fromJid, text, msgId) {
     }
 }
 
+let lastErrorMsg = null;
+
+app.get('/status', (req, res) => {
+    res.json({
+        status: clientStatus,
+        isReady: clientStatus === 'READY',
+        hasQr: !!latestQrDataUrl,
+        lastError: lastErrorMsg,
+        webhookUrl: webhookUrl,
+        port: PORT
+    });
+});
+
 async function startBaileys() {
     clientStatus = 'STARTING';
-    const authFolder = path.join(__dirname, 'auth_info_baileys');
-    const { state, saveCreds } = await useMultiFileAuthState(authFolder);
-    const { version } = await fetchLatestBaileysVersion();
-
-    waSock = makeWASocket({
-        version,
-        logger: pino({ level: 'silent' }),
-        printQRInTerminal: true,
-        auth: state,
-        browser: Browsers.ubuntu('Chrome'),
-        syncFullHistory: false,
-        connectTimeoutMs: 60000,
-        keepAliveIntervalMs: 15000,
-        generateHighQualityLinkPreview: true
-    });
-
-    waSock.ev.on('creds.update', saveCreds);
-
-    // ESCUCHAR MENSAJES ENTRANTES Y RESPONDER CON CENTINELA BOT
-    waSock.ev.on('messages.upsert', async (m) => {
-        for (const msg of m.messages) {
-            // Ignorar respuestas generadas por el propio servidor
-            if (msg.key.id && botSentMessageIds.has(msg.key.id)) {
-                botSentMessageIds.delete(msg.key.id);
-                continue;
-            }
-
-            const from = msg.key.remoteJid;
-            const text = msg.message?.conversation || 
-                         msg.message?.extendedTextMessage?.text || 
-                         msg.message?.imageMessage?.caption || 
-                         '';
-
-            if (!text || !text.trim()) continue;
-
-            console.log(`[WHATSAPP] Mensaje recibido de ${from}: '${text.trim()}'`);
-
-            // 1. Procesar respuesta del Centinela Bot inmediatamente
-            procesarMensajeCentinela(from, text.trim(), msg.key.id);
-
-            // 2. Reenviar al webhook externo configurado (si existe)
-            if (webhookUrl && webhookUrl.startsWith('http')) {
-                const isGroup = from.endsWith('@g.us');
-                const senderNumber = (msg.key.participant || from).split('@')[0];
-                const payload = {
-                    from: from,
-                    sender: senderNumber,
-                    senderName: msg.pushName || 'Usuario',
-                    isGroup: isGroup,
-                    messageId: msg.key.id,
-                    text: text.trim(),
-                    timestamp: msg.messageTimestamp,
-                    messageType: Object.keys(msg.message || {})[0] || 'unknown',
-                    raw: msg
-                };
-
-                fetch(webhookUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                }).catch(() => {});
-            }
-        }
-    });
-
-    waSock.ev.on('connection.update', async (update) => {
-        const { connection, lastDisconnect, qr } = update;
-
-        if (qr) {
-            clientStatus = 'SCAN_QR';
-            latestQrDataUrl = await QRCode.toDataURL(qr);
-            console.log('📌 Código QR generado. Abre http://localhost:' + PORT + '/qr');
-            qrcodeTerminal.generate(qr, { small: true });
+    lastErrorMsg = null;
+    try {
+        const authFolder = path.join(__dirname, 'auth_info_baileys');
+        if (!fs.existsSync(authFolder)) {
+            fs.mkdirSync(authFolder, { recursive: true });
         }
 
-        if (connection === 'close') {
-            const statusCode = (lastDisconnect?.error)?.output?.statusCode;
-            const isLoggedOut = statusCode === DisconnectReason.loggedOut;
-            console.log(`Conexión cerrada (status: ${statusCode}). Reconectando...`);
-            clientStatus = 'DISCONNECTED';
-            if (isLoggedOut || statusCode === 401 || statusCode === 428) {
-                console.log('Limpiando credenciales antiguas para generar nuevo QR...');
-                try {
-                    fs.rmSync(authFolder, { recursive: true, force: true });
-                } catch (e) {}
-            }
-            setTimeout(startBaileys, 3000);
-        } else if (connection === 'open') {
-            console.log('✅ Conexión establecida con WhatsApp con éxito!');
-            clientStatus = 'READY';
-            latestQrDataUrl = null;
+        const { state, saveCreds } = await useMultiFileAuthState(authFolder);
+
+        let version = [2, 3000, 1043857760];
+        try {
+            const vObj = await fetchLatestBaileysVersion();
+            if (vObj && vObj.version) version = vObj.version;
+        } catch (e) {
+            console.log('Using default Baileys version:', e.message);
         }
-    });
+
+        waSock = makeWASocket({
+            version,
+            logger: pino({ level: 'silent' }),
+            printQRInTerminal: true,
+            auth: state,
+            browser: Browsers.ubuntu('Chrome'),
+            syncFullHistory: false,
+            connectTimeoutMs: 60000,
+            keepAliveIntervalMs: 15000,
+            generateHighQualityLinkPreview: true
+        });
+
+        waSock.ev.on('creds.update', saveCreds);
+
+        waSock.ev.on('messages.upsert', async (m) => {
+            for (const msg of m.messages) {
+                if (msg.key.id && botSentMessageIds.has(msg.key.id)) {
+                    botSentMessageIds.delete(msg.key.id);
+                    continue;
+                }
+                const from = msg.key.remoteJid;
+                const text = msg.message?.conversation || 
+                             msg.message?.extendedTextMessage?.text || 
+                             msg.message?.imageMessage?.caption || 
+                             '';
+                if (!text || !text.trim()) continue;
+                procesarMensajeCentinela(from, text.trim(), msg.key.id);
+            }
+        });
+
+        waSock.ev.on('connection.update', async (update) => {
+            const { connection, lastDisconnect, qr } = update;
+
+            if (qr) {
+                clientStatus = 'SCAN_QR';
+                latestQrDataUrl = await QRCode.toDataURL(qr);
+                console.log('📌 Código QR generado. Abre http://localhost:' + PORT + '/qr');
+            }
+
+            if (connection === 'close') {
+                const statusCode = (lastDisconnect?.error)?.output?.statusCode;
+                const isLoggedOut = statusCode === DisconnectReason.loggedOut;
+                lastErrorMsg = `Close status: ${statusCode}`;
+                console.log(`Conexión cerrada (status: ${statusCode}). Reconectando...`);
+                clientStatus = 'DISCONNECTED';
+                if (isLoggedOut || statusCode === 401 || statusCode === 428) {
+                    console.log('Limpiando credenciales antiguas para generar nuevo QR...');
+                    try {
+                        fs.rmSync(authFolder, { recursive: true, force: true });
+                    } catch (e) {}
+                }
+                setTimeout(startBaileys, 3000);
+            } else if (connection === 'open') {
+                console.log('✅ Conexión establecida con WhatsApp con éxito!');
+                clientStatus = 'READY';
+                latestQrDataUrl = null;
+                lastErrorMsg = null;
+            }
+        });
+    } catch (err) {
+        lastErrorMsg = err.message || String(err);
+        console.error('[BAILEYS] Error fatal al iniciar:', err);
+        clientStatus = 'ERROR';
+        setTimeout(startBaileys, 5000);
+    }
 }
 
 app.listen(PORT, () => {
