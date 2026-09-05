@@ -15,7 +15,7 @@ from flask import Flask, jsonify, request, send_from_directory, render_template_
 from smn_scraper import get_active_cyclones, fetch_cyclone_data
 from report_generator import generate_word_report
 from email_sender import send_cyclone_email, send_whatsapp_disconnected_alert
-from telegram_sender import send_cyclone_telegram
+from telegram_sender import send_cyclone_telegram, handle_incoming_telegram_update
 from whatsapp_sender import send_cyclone_whatsapp
 from teams_sender import send_cyclone_teams
 from centinela_bot import handle_incoming_whatsapp_message, handle_incoming_teams_message, get_azure_blob_bytes
@@ -412,6 +412,17 @@ def teams_centinela_webhook():
     server_base_url = os.getenv("SERVER_PUBLIC_URL", request.host_url).rstrip("/")
     response_card = handle_incoming_teams_message(payload, server_base_url=server_base_url)
     return jsonify(response_card), 200
+
+
+@app.route("/api/telegram/webhook", methods=["POST"])
+@app.route("/api/telegram/centinela", methods=["POST"])
+def telegram_centinela_webhook():
+    """Webhook para recibir mensajes interactivos dirigidos a Centinela desde el Bot de Telegram."""
+    payload = request.get_json(silent=True) or {}
+    server_base_url = os.getenv("SERVER_PUBLIC_URL", request.host_url).rstrip("/")
+    if payload:
+        threading.Thread(target=handle_incoming_telegram_update, args=(payload,), kwargs={"server_base_url": server_base_url}, daemon=True).start()
+    return jsonify({"status": "received"}), 200
 
 
 @app.route("/media/azure/<container>/<blob_name>", methods=["GET"])

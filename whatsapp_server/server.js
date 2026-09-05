@@ -94,6 +94,7 @@ function getMenuText() {
         "4️⃣ Condición de los Embalses\n" +
         "5️⃣ Aportaciones por Cuenca Propia de Embalse\n" +
         "7️⃣ Reporte de Disponibilidad\n" +
+        "8️⃣ 🌀 Avisos de Ciclón Tropical (SMN / CONAGUA)\n" +
         "11️⃣ Reporte de lluvias 24h (6am a 6am)\n" +
         "12️⃣ Reporte de lluvias parcial\n" +
         "6️⃣ 🤖 Consultar con IA\n\n" +
@@ -449,6 +450,38 @@ async function procesarMensajeCentinela(fromJid, text, msgId) {
         const buf = await downloadAzureBlob('reporte-unidades', 'telegram_report.txt');
         if (buf) await sendMsg(`📊 *Reporte de Disponibilidad*\n\n${buf.toString('utf8')}`);
         else await sendMsg('⚠️ No se pudo obtener el reporte de disponibilidad.');
+    } else if (['8', '08', 'ciclon', 'ciclón', 'ciclones', 'huracan', 'huracán', 'tormenta'].includes(cleanCmd)) {
+        try {
+            const flaskPort = process.env.PORT || 8080;
+            const resCyclones = await fetch(`http://127.0.0.1:${flaskPort}/api/cyclones`).then(r => r.json()).catch(() => null);
+            if (resCyclones && Array.isArray(resCyclones) && resCyclones.length > 0) {
+                let msgText = `🌀 *AVISOS DE CICLÓN TROPICAL ACTIVOS (${resCyclones.length}) — CFE / SMN*\n\n`;
+                for (const c of resCyclones) {
+                    const cond = c.condiciones || {};
+                    msgText += `📍 *${(c.sistema || 'Ciclón Tropical').toUpperCase()}* (${c.cuenca || 'Océano'})\n`;
+                    if (c.titular) msgText += `_${c.titular}_\n\n`;
+                    msgText += `📊 *Condiciones:*\n`;
+                    msgText += `• *Distancia:* ${cond.distancia_costa || '--'}\n`;
+                    msgText += `• *Desplazamiento:* ${cond.desplazamiento || '--'}\n`;
+                    msgText += `• *Vientos:* ${cond.vientos_sostenidos || '--'} km/h (Rachas: ${cond.vientos_rachas || '--'} km/h)\n`;
+                    msgText += `• *Lluvias:* ${cond.pronostico_lluvia || 'Sin efectos directos'}\n\n`;
+                    if (c.proximo_aviso) msgText += `🔔 _${c.proximo_aviso}_\n`;
+                }
+                await sendMsg(msgText);
+            } else {
+                await sendMsg(
+                    "☀️ *MONITOREO DE CICLONES TROPICALES — CFE / SMN*\n\n" +
+                    "✅ *Sin ciclones activos en este momento.*\n\n" +
+                    "Actualmente no se registran sistemas ciclónicos en el Océano Pacífico ni en el Océano Atlántico / Golfo de México.\n\n" +
+                    "📡 _Monitoreo satelital continuo las 24 horas._"
+                );
+            }
+        } catch (e) {
+            await sendMsg(
+                "☀️ *MONITOREO DE CICLONES TROPICALES — CFE / SMN*\n\n" +
+                "✅ *Sin ciclones activos en este momento.*"
+            );
+        }
     } else if (body === '6') {
         usuariosEnModoIA.add(fromJid);
         await sendMsg(

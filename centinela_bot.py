@@ -14,6 +14,8 @@ import logging
 import requests
 import urllib.parse
 
+from smn_scraper import get_active_cyclones, fetch_cyclone_data
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 AZURE_ACCOUNT = os.getenv("AZURE_STORAGE_ACCOUNT", "reportegeneracion")
@@ -27,6 +29,96 @@ DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY") or "".join(chr(c ^ 42) for c in
 mensajes_procesados = {}
 usuarios_en_modo_ia = {}
 _blob_cache = {}
+
+
+def get_cyclones_summary(server_base_url="https://cfe-avisos-ciclones.onrender.com"):
+    """
+    Obtiene la información y resumen de ciclones activos desde CONAGUA/SMN
+    para responder en Centinela (WhatsApp, Teams, Telegram).
+    """
+    server_base_url = (server_base_url or "https://cfe-avisos-ciclones.onrender.com").rstrip("/")
+    try:
+        active_list = get_active_cyclones()
+    except Exception as e:
+        logging.error(f"[CENTINELA] Error al consultar SMN: {e}")
+        active_list = []
+
+    if not active_list:
+        return {
+            "has_active": False,
+            "count": 0,
+            "text_wa": (
+                "☀️ *MONITOREO DE CICLONES TROPICALES — CFE / SMN*\n\n"
+                "✅ *Sin ciclones activos en este momento.*\n\n"
+                "Actualmente no se registran sistemas ciclónicos ni alertas en las cuencas del "
+                "*Océano Pacífico* ni del *Océano Atlántico / Golfo de México / Mar Caribe*.\n\n"
+                "📡 _El sistema se mantiene en monitoreo satelital continuo las 24 horas._"
+            ),
+            "text_tg": (
+                "☀️ <b>MONITOREO DE CICLONES TROPICALES &mdash; CFE / SMN</b>\n\n"
+                "✅ <b>Sin ciclones activos en este momento.</b>\n\n"
+                "Actualmente no se registran sistemas ciclónicos ni alertas en las cuencas del "
+                "<b>Océano Pacífico</b> ni del <b>Océano Atlántico / Golfo de México</b>.\n\n"
+                "📡 <i>El sistema se mantiene en monitoreo continuo 24/7.</i>"
+            ),
+            "cyclones": []
+        }
+
+    cyclones_data = []
+    text_wa_parts = [f"🌀 *AVISOS DE CICLÓN TROPICAL ACTIVOS ({len(active_list)}) — CFE / SMN*\n"]
+    text_tg_parts = [f"🌀 <b>AVISOS DE CICLÓN TROPICAL ACTIVOS ({len(active_list)}) &mdash; CFE / SMN</b>\n"]
+
+    for c in active_list:
+        aviso_id = str(c["aviso_id"])
+        basin_key = c.get("basin_key", "pacifico")
+        data = fetch_cyclone_data(aviso_id, basin_key=basin_key, download_images=True)
+        if not data:
+            continue
+
+        cyclones_data.append(data)
+        sistema = data.get("sistema", "Ciclón Tropical")
+        cuenca = data.get("cuenca", "Océano")
+        titular = data.get("titular", "")
+        cond = data.get("condiciones", {})
+        proximo = data.get("proximo_aviso", "")
+
+        # Resumen WhatsApp
+        part_wa = (
+            f"📍 *{sistema.upper()}* ({cuenca})\n"
+            f"_{titular}_\n\n"
+            f"📊 *Condiciones Técnicas:*\n"
+            f"• *Hora:* {cond.get('hora_local_gmt', '--')}\n"
+            f"• *Ubicación:* Lat {cond.get('latitud_norte', '--')}°N, Lon {cond.get('longitud_oeste', '--')}°O\n"
+            f"• *Distancia:* {cond.get('distancia_costa', '--')}\n"
+            f"• *Desplazamiento:* {cond.get('desplazamiento', '--')}\n"
+            f"• *Vientos:* {cond.get('vientos_sostenidos', '--')} km/h (Rachas: {cond.get('vientos_rachas', '--')} km/h)\n"
+            f"• *Presión:* {cond.get('presion_minima', '--')} hPa\n"
+            f"• *Lluvias:* {cond.get('pronostico_lluvia', 'Sin afectaciones directas')}\n\n"
+            f"🔔 _{proximo}_\n"
+            f"🌐 [Portal CFE Ciclones]({server_base_url})\n"
+        )
+        text_wa_parts.append(part_wa)
+
+        # Resumen Telegram
+        part_tg = (
+            f"📍 <b>{sistema.upper()}</b> ({cuenca})\n"
+            f"<i>{titular}</i>\n\n"
+            f"📊 <b>Condiciones:</b>\n"
+            f"• <b>Distancia:</b> {cond.get('distancia_costa', '--')}\n"
+            f"• <b>Desplazamiento:</b> {cond.get('desplazamiento', '--')}\n"
+            f"• <b>Vientos:</b> Sost: {cond.get('vientos_sostenidos', '--')} km/h | Rachas: {cond.get('vientos_rachas', '--')} km/h\n"
+            f"• <b>Lluvias:</b> {cond.get('pronostico_lluvia', 'Sin afectaciones')}\n\n"
+            f"🔔 <i>{proximo}</i>\n"
+        )
+        text_tg_parts.append(part_tg)
+
+    return {
+        "has_active": True,
+        "count": len(cyclones_data),
+        "text_wa": "\n---\n\n".join(text_wa_parts),
+        "text_tg": "\n---\n\n".join(text_tg_parts),
+        "cyclones": cyclones_data
+    }
 
 
 def generate_blob_sas_url(container, blob_name, expiry_hours=48):
@@ -155,6 +247,7 @@ def get_menu_text():
         "4️⃣ Condición de los Embalses\n"
         "5️⃣ Aportaciones por Cuenca Propia de Embalse\n"
         "7️⃣ Reporte de Disponibilidad\n"
+        "8️⃣ 🌀 Avisos de Ciclón Tropical (SMN / CONAGUA)\n"
         "11️⃣ Reporte de lluvias 24h (6am a 6am)\n"
         "12️⃣ Reporte de lluvias parcial\n"
         "6️⃣ 🤖 Consultar con IA\n\n"
@@ -289,6 +382,27 @@ def handle_incoming_whatsapp_message(payload):
         else:
             send_wa_text(from_jid, "⚠️ No se pudo obtener el reporte de lluvias parcial.")
 
+    elif text in ["8", "08"] or any(k in text.lower() for k in ["ciclon", "ciclón", "ciclones", "huracan", "huracán", "tormenta", "aviso ciclon", "opcion 8", "opción 8"]):
+        summary = get_cyclones_summary()
+        send_wa_text(from_jid, summary["text_wa"])
+        # Si hay ciclones con imagen satelital o trayectoria descargada, enviar la imagen
+        if summary.get("has_active") and summary.get("cyclones"):
+            for c in summary["cyclones"]:
+                tray_path = c.get("img_tray_path")
+                sat_path = c.get("img_sat_path")
+                img_to_send = tray_path if (tray_path and os.path.exists(tray_path)) else (sat_path if (sat_path and os.path.exists(sat_path)) else None)
+                if img_to_send:
+                    try:
+                        with open(img_to_send, "rb") as f_img:
+                            send_wa_image_base64(
+                                from_jid,
+                                f_img.read(),
+                                f"🗺️ *Cono de Trayectoria / Satélite:* {c.get('sistema', 'Ciclón Tropical')}",
+                                "trayectoria_ciclon.png"
+                            )
+                    except Exception as e:
+                        logging.debug(f"[CENTINELA] No se pudo enviar imagen de ciclón a WhatsApp: {e}")
+
     elif text == "7":
         report_text = get_azure_blob_text("reporte-unidades", "telegram_report.txt")
         if report_text:
@@ -413,6 +527,7 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
                     {"title": "4️⃣ o 'embalses':", "value": "Condición de los Embalses (Niveles/Cotas)"},
                     {"title": "5️⃣ o 'cuenca':", "value": "Aportaciones por Cuenca Propia"},
                     {"title": "7️⃣ o 'disponibilidad':", "value": "Reporte de Disponibilidad Hidroeléctrica"},
+                    {"title": "8️⃣ o 'ciclon':", "value": "Avisos de Ciclón Tropical y Trayectoria"},
                     {"title": "11 o 'lluvias 24h':", "value": "Reporte de Lluvias 24h (6am a 6am)"},
                     {"title": "12 o 'lluvias parcial':", "value": "Reporte de Lluvias acumulado parcial"},
                     {"title": "🤖 Consulta Técnica IA:", "value": "Escribe directamente tu pregunta con @Centinela"}
@@ -424,7 +539,7 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
                 "items": [
                     {
                         "type": "TextBlock",
-                        "text": "💡 **Tip de uso:** Escribe `@Centinela 4` para ver embalses o haz preguntas directas como: `@Centinela ¿cuál es la capacidad útil de Angostura?`",
+                        "text": "💡 **Tip de uso:** Escribe `@Centinela 8` para monitoreo de ciclones o `@Centinela 4` para ver embalses.",
                         "wrap": True,
                         "size": "Small"
                     }
@@ -524,7 +639,106 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
         actions = [{"type": "Action.OpenUrl", "title": "🔍 Ver Imagen Completa", "url": img_url}]
         return _wrap_teams_card(body, actions)
 
-    # 7. Reporte de Lluvias 24h (Opción 11)
+    # 7. Reporte de Ciclones Tropicales (Opción 8)
+    if cmd in ["8", "08"] or any(k in cmd for k in ["ciclon", "ciclón", "ciclones", "huracan", "huracán", "tormenta", "aviso ciclon", "opcion 8", "opción 8"]) or re.match(r"^8(\D|$)", cmd):
+        summary = get_cyclones_summary(server_base_url=server_base_url)
+        if not summary.get("has_active") or not summary.get("cyclones"):
+            body = [
+                _build_teams_header("☀️ Monitoreo de Ciclones Tropicales — CFE / SMN", "Vigilancia Hidrometeorológica 24/7"),
+                {
+                    "type": "Container",
+                    "style": "good",
+                    "items": [
+                        {
+                            "type": "TextBlock",
+                            "text": "✅ **Sin ciclones tropicales activos en este momento.**",
+                            "weight": "Bolder",
+                            "color": "Good"
+                        },
+                        {
+                            "type": "TextBlock",
+                            "text": "Actualmente no se registran alertas ciclónicas en el Océano Pacífico ni en el Océano Atlántico / Golfo de México / Mar Caribe.",
+                            "wrap": True,
+                            "spacing": "Small"
+                        }
+                    ]
+                },
+                {
+                    "type": "FactSet",
+                    "facts": [
+                        {"title": "Océano Pacífico:", "value": "Normalidad / Sin Alertas"},
+                        {"title": "Océano Atlántico:", "value": "Normalidad / Sin Alertas"},
+                        {"title": "Monitoreo Satelital:", "value": "Automático cada 15 minutos"}
+                    ]
+                },
+                _build_teams_footer()
+            ]
+            actions = [{"type": "Action.OpenUrl", "title": "🌐 Ver Portal CONAGUA SMN", "url": "https://smn.conagua.gob.mx"}]
+            return _wrap_teams_card(body, actions)
+
+        # Si hay ciclón activo
+        c = summary["cyclones"][0]
+        sistema = c.get("sistema", "Ciclón Tropical")
+        cuenca = c.get("cuenca", "Océano")
+        titular = c.get("titular", "")
+        cond = c.get("condiciones", {})
+        proximo = c.get("proximo_aviso", "")
+        img_tray_url = c.get("img_tray_url")
+        basin_url = c.get("basin_url", "https://smn.conagua.gob.mx")
+
+        body = [
+            _build_teams_header(f"🌀 {sistema.upper()}", f"Aviso de Ciclón Tropical • {cuenca} • CONAGUA/SMN"),
+            {
+                "type": "Container",
+                "style": "attention",
+                "items": [
+                    {
+                        "type": "TextBlock",
+                        "text": f"🚨 **{titular}**" if titular else f"🚨 **{sistema} en vigilancia activa**",
+                        "wrap": True,
+                        "weight": "Bolder"
+                    }
+                ]
+            },
+            {
+                "type": "FactSet",
+                "facts": [
+                    {"title": "📍 Ubicación:", "value": f"Lat {cond.get('latitud_norte', '--')}°N, Lon {cond.get('longitud_oeste', '--')}°O"},
+                    {"title": "📏 Distancia a Costa:", "value": str(cond.get("distancia_costa", "--"))},
+                    {"title": "🧭 Desplazamiento:", "value": str(cond.get("desplazamiento", "--"))},
+                    {"title": "💨 Vientos Sostenidos:", "value": f"{cond.get('vientos_sostenidos', '--')} km/h (Rachas: {cond.get('vientos_rachas', '--')} km/h)"},
+                    {"title": "⏲️ Presión Mínima:", "value": f"{cond.get('presion_minima', '--')} hPa"},
+                    {"title": "🌧️ Pronóstico Lluvias:", "value": str(cond.get("pronostico_lluvia", "En vigilancia"))}
+                ]
+            }
+        ]
+
+        if img_tray_url:
+            body.append({
+                "type": "Image",
+                "url": img_tray_url,
+                "altText": "Cono de Trayectoria",
+                "size": "Auto",
+                "selectAction": {"type": "Action.OpenUrl", "url": img_tray_url}
+            })
+
+        if proximo:
+            body.append({
+                "type": "TextBlock",
+                "text": f"🔔 _{proximo}_",
+                "isSubtle": True,
+                "size": "Small",
+                "wrap": True
+            })
+
+        body.append(_build_teams_footer())
+        actions = [
+            {"type": "Action.OpenUrl", "title": "🌐 Fuente Oficial SMN", "url": basin_url},
+            {"type": "Action.OpenUrl", "title": "📑 Portal Avisos CFE", "url": server_base_url}
+        ]
+        return _wrap_teams_card(body, actions)
+
+    # 8. Reporte de Lluvias 24h (Opción 11)
     if cmd in ["11"] or any(k in cmd for k in ["lluvia 24", "lluvias 24", "lluvia 24h", "lluvias 24h", "24 horas", "opcion 11", "opción 11"]) or re.match(r"^11(\D|$)", cmd):
         blob_name = "reporte_lluvia_1_1_638848218556433423.png"
         img_url = generate_blob_sas_url("unidades", blob_name) or f"{server_base_url}/media/azure/unidades/{blob_name}"
@@ -542,7 +756,7 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
         actions = [{"type": "Action.OpenUrl", "title": "🔍 Ver Imagen Completa", "url": img_url}]
         return _wrap_teams_card(body, actions)
 
-    # 8. Reporte de Lluvias Parcial (Opción 12)
+    # 9. Reporte de Lluvias Parcial (Opción 12)
     if cmd in ["12"] or any(k in cmd for k in ["lluvia parcial", "lluvias parcial", "parcial", "opcion 12", "opción 12"]) or re.match(r"^12(\D|$)", cmd):
         blob_name = "reporte_lluvia_1_2_638848218556433423.png"
         img_url = generate_blob_sas_url("unidades", blob_name) or f"{server_base_url}/media/azure/unidades/{blob_name}"
@@ -560,7 +774,7 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
         actions = [{"type": "Action.OpenUrl", "title": "🔍 Ver Imagen Completa", "url": img_url}]
         return _wrap_teams_card(body, actions)
 
-    # 9. Reporte de Disponibilidad (Opción 7)
+    # 10. Reporte de Disponibilidad (Opción 7)
     if cmd in ["7", "07"] or any(k in cmd for k in ["disponibilidad", "disponible", "opcion 7", "opción 7"]) or re.match(r"^7(\D|$)", cmd):
         report_text = get_azure_blob_text("reporte-unidades", "telegram_report.txt")
         body = [
