@@ -572,7 +572,8 @@ async function startBaileys() {
         logger: pino({ level: 'silent' }),
         printQRInTerminal: true,
         auth: state,
-        browser: Browsers.macOS('Desktop'),
+        browser: Browsers.ubuntu('Chrome'),
+        syncFullHistory: false,
         connectTimeoutMs: 60000,
         keepAliveIntervalMs: 15000,
         generateHighQualityLinkPreview: true
@@ -638,12 +639,17 @@ async function startBaileys() {
         }
 
         if (connection === 'close') {
-            const shouldReconnect = (lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
-            console.log('Conexión cerrada. Reconectando:', shouldReconnect);
+            const statusCode = (lastDisconnect?.error)?.output?.statusCode;
+            const isLoggedOut = statusCode === DisconnectReason.loggedOut;
+            console.log(`Conexión cerrada (status: ${statusCode}). Reconectando...`);
             clientStatus = 'DISCONNECTED';
-            if (shouldReconnect) {
-                setTimeout(startBaileys, 3000);
+            if (isLoggedOut || statusCode === 401 || statusCode === 428) {
+                console.log('Limpiando credenciales antiguas para generar nuevo QR...');
+                try {
+                    fs.rmSync(authFolder, { recursive: true, force: true });
+                } catch (e) {}
             }
+            setTimeout(startBaileys, 3000);
         } else if (connection === 'open') {
             console.log('✅ Conexión establecida con WhatsApp con éxito!');
             clientStatus = 'READY';
