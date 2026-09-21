@@ -14,13 +14,18 @@ import requests
 def send_cyclone_telegram(cyclone_data, docx_path):
     """
     Envía la notificación del ciclón con sus imágenes satelitales y de trayectoria
-    seguido del documento Word adjunto a un canal/chat de Telegram.
+    seguido del documento Word adjunto a uno o varios canales/chats de Telegram.
+    Soporta múltiples IDs o canales separados por coma en TELEGRAM_CHAT_ID.
     """
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-    chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+    raw_chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 
-    if not bot_token or not chat_id:
+    if not bot_token or not raw_chat_id:
         logging.info("[TELEGRAM] Envío por Telegram no configurado (falta TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID).")
+        return False
+
+    chat_ids = [c.strip() for c in raw_chat_id.split(",") if c.strip()]
+    if not chat_ids:
         return False
 
     sistema = cyclone_data.get("sistema", "Ciclón Tropical")
@@ -53,66 +58,85 @@ def send_cyclone_telegram(cyclone_data, docx_path):
 
     base_url = f"https://api.telegram.org/bot{bot_token}"
 
-    try:
-        # 1. Enviar Álbum de Fotos (Satélite + Trayectoria) con el texto del aviso
-        media = []
-        files = {}
-        
-        has_sat = img_sat_path and os.path.exists(img_sat_path)
-        has_tray = img_tray_path and os.path.exists(img_tray_path)
+    sat_bytes = None
+    if img_sat_path and os.path.exists(img_sat_path):
+        try:
+            with open(img_sat_path, "rb") as f:
+                sat_bytes = f.read()
+        except Exception as e:
+            logging.error(f"[TELEGRAM] Error leyendo satélite {img_sat_path}: {e}")
 
-        if has_sat:
-            files["sat"] = open(img_sat_path, "rb")
-            media.append({
-                "type": "photo",
-                "media": "attach://sat",
-                "caption": caption[:1024],
-                "parse_mode": "HTML"
-            })
+    tray_bytes = None
+    if img_tray_path and os.path.exists(img_tray_path):
+        try:
+            with open(img_tray_path, "rb") as f:
+                tray_bytes = f.read()
+        except Exception as e:
+            logging.error(f"[TELEGRAM] Error leyendo trayectoria {img_tray_path}: {e}")
 
-        if has_tray:
-            files["tray"] = open(img_tray_path, "rb")
-            media.append({
-                "type": "photo",
-                "media": "attach://tray"
-            })
+    doc_bytes = None
+    if os.path.exists(docx_path):
+        try:
+            with open(docx_path, "rb") as f:
+                doc_bytes = f.read()
+        except Exception as e:
+            logging.error(f"[TELEGRAM] Error leyendo docx {docx_path}: {e}")
 
-        if media:
-            media_url = f"{base_url}/sendMediaGroup"
-            res_media = requests.post(
-                media_url,
-                data={"chat_id": chat_id, "media": json.dumps(media)},
-                files=files,
-                timeout=30
-            )
-            # Cerrar los archivos de imágenes
-            for f in files.values():
-                f.close()
-                
-            logging.info(f"[TELEGRAM] Fotos enviadas: {res_media.json().get('ok')}")
-        else:
-            # Si no hay fotos, enviar texto simple
-            msg_url = f"{base_url}/sendMessage"
-            requests.post(msg_url, json={"chat_id": chat_id, "text": caption, "parse_mode": "HTML"}, timeout=20)
+    any_success = False
+    for target_chat in chat_ids:
+        try:
+            # 1. Enviar Álbum de Fotos (Satélite + Trayectoria) con el texto del aviso
+            media = []
+            files = {}
+            if sat_bytes:
+                files["sat"] = ("sat.png", sat_bytes, "image/png")
+                media.append({
+                    "type": "photo",
+                    "media": "attach://sat",
+                    "caption": caption[:1024],
+                    "parse_mode": "HTML"
+                })
 
-        # 2. Enviar el Documento Word (.docx) oficial adjunto
-        if os.path.exists(docx_path):
-            with open(docx_path, "rb") as f_doc:
+            if tray_bytes:
+                files["tray"] = ("tray.png", tray_bytes, "image/png")
+                media.append({
+                    "type": "photo",
+                    "media": "attach://tray"
+                })
+
+            if media:
+                media_url = f"{base_url}/sendMediaGroup"
+                res_media = requests.post(
+                    media_url,
+                    data={"chat_id": target_chat, "media": json.dumps(media)},
+                    files=files,
+                    timeout=35
+                )
+                res_json = res_media.json()
+                logging.info(f"[TELEGRAM] Fotos enviadas a {target_chat}: {res_json.get('ok')} ({res_json.get('description', '')})")
+            else:
+                msg_url = f"{base_url}/sendMessage"
+                res_msg = requests.post(msg_url, json={"chat_id": target_chat, "text": caption, "parse_mode": "HTML"}, timeout=20)
+                logging.info(f"[TELEGRAM] Mensaje enviado a {target_chat}: {res_msg.json().get('ok')}")
+
+            # 2. Enviar el Documento Word (.docx) oficial adjunto
+            if doc_bytes:
                 doc_url = f"{base_url}/sendDocument"
                 doc_data = {
-                    "chat_id": chat_id,
+                    "chat_id": target_chat,
                     "caption": f"📄 Reporte Oficial CFE: <b>{sistema}</b>",
                     "parse_mode": "HTML"
                 }
-                doc_files = {"document": (filename, f_doc, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}
-                res_doc = requests.post(doc_url, data=doc_data, files=doc_files, timeout=30)
-                logging.info(f"[TELEGRAM] Word adjunto enviado: {res_doc.json().get('ok')}")
+                doc_files = {"document": (filename, doc_bytes, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}
+                res_doc = requests.post(doc_url, data=doc_data, files=doc_files, timeout=35)
+                res_doc_json = res_doc.json()
+                logging.info(f"[TELEGRAM] Word adjunto enviado a {target_chat}: {res_doc_json.get('ok')} ({res_doc_json.get('description', '')})")
 
-        return True
+            any_success = True
+        except Exception as e:
+            logging.error(f"[TELEGRAM] Error al enviar a destinatario {target_chat}: {e}")
 
-    except Exception as e:
-        logging.error(f"[TELEGRAM] Error al enviar a Telegram: {e}")
-        return False
+    return any_success
 
 
 def send_telegram_text(chat_id, text, parse_mode="HTML"):
