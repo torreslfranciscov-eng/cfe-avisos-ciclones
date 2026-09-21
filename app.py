@@ -140,8 +140,42 @@ def background_monitor_worker():
         time.sleep(POLL_INTERVAL_MINUTES * 60)
 
 
+def background_telegram_polling_worker():
+    """Hilo en segundo plano para procesar comandos interactivos de Centinela vía Telegram sin requerir webhook HTTPS."""
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    if not bot_token:
+        logging.info("[TELEGRAM CENTINELA] Sin TELEGRAM_BOT_TOKEN, polling interactivo omitido.")
+        return
+    offset = None
+    server_base_url = os.getenv("SERVER_PUBLIC_URL", "http://20.102.124.195:10000").rstrip("/")
+    logging.info("[TELEGRAM CENTINELA] Iniciando polling interactivo de comandos...")
+    while True:
+        try:
+            url = f"https://api.telegram.org/bot{bot_token}/getUpdates?timeout=20"
+            if offset:
+                url += f"&offset={offset}"
+            r = http_requests.get(url, timeout=25)
+            if r.status_code == 200:
+                data = r.json()
+                for update in data.get("result", []):
+                    offset = update["update_id"] + 1
+                    threading.Thread(
+                        target=handle_incoming_telegram_update,
+                        args=(update,),
+                        kwargs={"server_base_url": server_base_url},
+                        daemon=True
+                    ).start()
+        except Exception as e:
+            logging.debug(f"[TELEGRAM CENTINELA] Error en polling: {e}")
+            time.sleep(5)
+        time.sleep(1)
+
+
 monitor_thread = threading.Thread(target=background_monitor_worker, daemon=True)
 monitor_thread.start()
+
+telegram_thread = threading.Thread(target=background_telegram_polling_worker, daemon=True)
+telegram_thread.start()
 
 
 @app.route("/")
