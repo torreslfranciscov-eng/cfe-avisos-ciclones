@@ -20,7 +20,7 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-const PORT = process.env.WA_PORT || 8085;
+const PORT = process.env.WA_PORT || 8086;
 let waSock = null;
 let latestQrDataUrl = null;
 let clientStatus = 'INITIALIZING';
@@ -574,10 +574,22 @@ app.get('/status', (req, res) => {
     });
 });
 
+let isStarting = false;
+
 async function startBaileys() {
+    if (isStarting) return;
+    isStarting = true;
     clientStatus = 'STARTING';
     lastErrorMsg = null;
     try {
+        if (waSock) {
+            try {
+                waSock.ev.removeAllListeners();
+                waSock.end();
+            } catch (e) {}
+            waSock = null;
+        }
+
         const authFolder = path.join(__dirname, 'auth_info_baileys');
         if (!fs.existsSync(authFolder)) {
             fs.mkdirSync(authFolder, { recursive: true });
@@ -601,7 +613,7 @@ async function startBaileys() {
             browser: Browsers.ubuntu('Chrome'),
             syncFullHistory: false,
             connectTimeoutMs: 60000,
-            keepAliveIntervalMs: 15000,
+            keepAliveIntervalMs: 25000,
             generateHighQualityLinkPreview: true
         });
 
@@ -644,18 +656,22 @@ async function startBaileys() {
                         fs.rmSync(authFolder, { recursive: true, force: true });
                     } catch (e) {}
                 }
-                setTimeout(startBaileys, 3000);
+                isStarting = false;
+                const waitTime = statusCode === 440 ? 5000 : 3000;
+                setTimeout(startBaileys, waitTime);
             } else if (connection === 'open') {
                 console.log('✅ Conexión establecida con WhatsApp con éxito!');
                 clientStatus = 'READY';
                 latestQrDataUrl = null;
                 lastErrorMsg = null;
+                isStarting = false;
             }
         });
     } catch (err) {
         lastErrorMsg = err.message || String(err);
         console.error('[BAILEYS] Error fatal al iniciar:', err);
         clientStatus = 'ERROR';
+        isStarting = false;
         setTimeout(startBaileys, 5000);
     }
 }
