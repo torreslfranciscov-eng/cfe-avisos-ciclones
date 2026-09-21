@@ -650,8 +650,8 @@ async function startBaileys() {
                 lastErrorMsg = `Close status: ${statusCode}`;
                 console.log(`Conexión cerrada (status: ${statusCode}). Reconectando...`);
                 clientStatus = 'DISCONNECTED';
-                if (isLoggedOut || statusCode === 401 || statusCode === 428) {
-                    console.log('Limpiando credenciales antiguas para generar nuevo QR...');
+                if (isLoggedOut || statusCode === DisconnectReason.loggedOut || statusCode === 401) {
+                    console.log('Sesión cerrada formalmente (loggedOut). Limpiando credenciales antiguas para generar nuevo QR...');
                     try {
                         fs.rmSync(authFolder, { recursive: true, force: true });
                     } catch (e) {}

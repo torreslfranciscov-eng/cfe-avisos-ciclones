@@ -1,8 +1,8 @@
 #!/bin/bash
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export PORT="${PORT:-10000}"
-export WA_PORT="${WA_PORT:-8085}"
-export OPENWA_SERVER_URL="${OPENWA_SERVER_URL:-http://localhost:8085}"
+export WA_PORT="${WA_PORT:-8086}"
+export OPENWA_SERVER_URL="${OPENWA_SERVER_URL:-http://localhost:8086}"
 
 echo "🚀 Iniciando servidor WhatsApp Baileys en puerto ${WA_PORT}..."
 (cd "$ROOT_DIR/whatsapp_server" && node server.js) &
