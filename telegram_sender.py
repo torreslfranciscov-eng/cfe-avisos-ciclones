@@ -178,11 +178,57 @@ def send_telegram_photo(chat_id, photo_bytes, caption="", filename="imagen.png")
         return False
 
 
+def answer_telegram_callback_query(callback_query_id, text=None, show_alert=False):
+    """Responde a un callback_query de Telegram para remover el estado de carga del botón."""
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    if not bot_token or not callback_query_id:
+        return False
+    try:
+        url = f"https://api.telegram.org/bot{bot_token}/answerCallbackQuery"
+        payload = {"callback_query_id": str(callback_query_id)}
+        if text:
+            payload["text"] = text
+            payload["show_alert"] = show_alert
+        requests.post(url, json=payload, timeout=10)
+        return True
+    except Exception as e:
+        logging.debug(f"[TELEGRAM] Error respondiendo callback: {e}")
+        return False
+
+
 def handle_incoming_telegram_update(payload, server_base_url="https://cfe-avisos-ciclones.onrender.com"):
     """
-    Procesa mensajes entrantes del bot de Telegram para Centinela SPH Grijalva.
+    Procesa mensajes entrantes del bot de Telegram para Centinela SPH Grijalva (@wgrijalva_bot).
+    Mantiene aislamiento absoluto: si recibe botones o comandos de Bitso, los redirige a @mibitso_bot.
     """
     from centinela_bot import get_azure_blob_bytes, get_azure_blob_text, ask_deepseek, get_cyclones_summary, AZURE_CONTAINER
+
+    # 0. Interceptar toques de botones (callback_query)
+    cb = payload.get("callback_query")
+    if cb:
+        cb_id = cb.get("id")
+        cb_data = (cb.get("data") or "").strip()
+        cb_msg = cb.get("message") or {}
+        chat_id = cb_msg.get("chat", {}).get("id")
+
+        # Si el botón proviene del bot de Bitso (ej. cmd_balance, cmd_positions, etc.)
+        if any(k in cb_data for k in ["cmd_", "balance", "pos", "trade", "buy", "sell", "bitso", "chart", "stop", "resume", "stars"]):
+            answer_telegram_callback_query(
+                cb_id,
+                text="⚠️ @wgrijalva_bot es exclusivo de Centinela CFE. Para Bitso usa @mibitso_bot",
+                show_alert=True
+            )
+            if chat_id:
+                send_telegram_text(
+                    chat_id,
+                    "⚠️ <b>Bot Exclusivo Centinela SPH Grijalva</b> (@wgrijalva_bot)\n\n"
+                    "Este botón pertenece al sistema de trading autónomo de Bitso.\n\n"
+                    "Para operar y consultar balances/posiciones en tiempo real, interactúa directamente con: 👉 <b>@mibitso_bot</b>."
+                )
+            return
+        else:
+            answer_telegram_callback_query(cb_id)
+            return
 
     msg = payload.get("message") or payload.get("channel_post") or {}
     chat_id = msg.get("chat", {}).get("id")
@@ -193,6 +239,25 @@ def handle_incoming_telegram_update(payload, server_base_url="https://cfe-avisos
         return
 
     cmd = raw_text.strip().lower()
+
+    # Redirigir comandos o consultas de trading/Bitso directamente a @mibitso_bot
+    bitso_triggers = [
+        "/balance", "balance", "/posiciones", "posiciones", "/pos", "pos",
+        "/bitso", "bitso", "/trading", "trading", "/crypto", "crypto",
+        "/capital", "capital", "/profit", "profit", "/pnl", "pnl",
+        "/btc", "btc", "/eth", "eth", "/xrp", "xrp", "/sol", "sol",
+        "/ordenes", "ordenes", "/orders", "orders", "/stop", "/resume"
+    ]
+    if cmd in bitso_triggers or any(cmd.startswith(x + " ") for x in ["/balance", "/posiciones", "/bitso", "/trading", "/capital", "/crypto"]):
+        send_telegram_text(
+            chat_id,
+            "ℹ️ <b>Separación de Bots Activa</b>\n\n"
+            "Este chat (<b>@wgrijalva_bot</b>) está reservado <u>únicamente</u> para el <b>Centinela del Sistema Hidroeléctrico del Grijalva</b> (Presas, Unidades Generadoras, Lluvias y Ciclones CFE).\n\n"
+            "📈 Tu bot de Bitso con balance, compras/ventas y terminal autónoma está en:\n"
+            "👉 <b>@mibitso_bot</b>\n\n"
+            "<i>(Abre @mibitso_bot y escribe /start para ver tu panel de trading).</i>"
+        )
+        return
 
     menu_text = (
         f"🤖 <b>Centinela SPH Grijalva &mdash; Menú de Consultas</b>\n\n"
@@ -207,7 +272,9 @@ def handle_incoming_telegram_update(payload, server_base_url="https://cfe-avisos
         f"11️⃣ <b>11</b> - Reporte de Lluvias 24h (6am a 6am)\n"
         f"12️⃣ <b>12</b> - Reporte de Lluvias Parcial\n"
         f"6️⃣ <b>6</b> o pregunta directa - 🤖 Consulta Técnica con IA\n\n"
-        f"💡 <i>Escribe el número de la opción o envía tu pregunta.</i>"
+        f"💡 <i>Escribe el número de la opción o envía tu pregunta técnica.</i>\n\n"
+        f"───────────────\n"
+        f"ℹ️ <i>Para tu bot de Trading y Balances Bitso, utiliza: @mibitso_bot</i>"
     )
 
     # 1. Menú principal

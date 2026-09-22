@@ -151,10 +151,13 @@ def background_telegram_polling_worker():
     logging.info("[TELEGRAM CENTINELA] Iniciando polling interactivo de comandos...")
     while True:
         try:
-            url = f"https://api.telegram.org/bot{bot_token}/getUpdates?timeout=20"
+            params = {
+                "timeout": 20,
+                "allowed_updates": json.dumps(["message", "callback_query"])
+            }
             if offset:
-                url += f"&offset={offset}"
-            r = http_requests.get(url, timeout=25)
+                params["offset"] = offset
+            r = http_requests.get(f"https://api.telegram.org/bot{bot_token}/getUpdates", params=params, timeout=25)
             if r.status_code == 200:
                 data = r.json()
                 for update in data.get("result", []):
