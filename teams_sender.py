@@ -210,6 +210,38 @@ def send_cyclone_teams(cyclone_data, docx_path=None):
             ]
         })
 
+    # Evaluación de Impacto CFE con Gemini AI (SOLO en mensaje Teams, NO en Word)
+    gemini_md = cyclone_data.get("gemini_analysis_md")
+    if not gemini_md:
+        try:
+            from gemini_analyzer import generate_gemini_impact_analysis
+            gemini_md = generate_gemini_impact_analysis(cyclone_data, format_type="markdown")
+        except Exception as e:
+            logging.debug(f"[TEAMS] No se pudo generar análisis Gemini: {e}")
+            gemini_md = ""
+
+    if gemini_md:
+        card_body.append({
+            "type": "Container",
+            "style": "warning",
+            "spacing": "Medium",
+            "items": [
+                {
+                    "type": "TextBlock",
+                    "text": "🤖 **EVALUACIÓN DE IMPACTO CFE — GEMINI AI**",
+                    "weight": "Bolder",
+                    "size": "Medium",
+                    "color": "Warning"
+                },
+                {
+                    "type": "TextBlock",
+                    "text": gemini_md[:2000],
+                    "wrap": True,
+                    "size": "Small"
+                }
+            ]
+        })
+
     # Pie institucional
     card_body.append({
         "type": "TextBlock",

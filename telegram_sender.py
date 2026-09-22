@@ -132,6 +132,30 @@ def send_cyclone_telegram(cyclone_data, docx_path):
                 res_doc_json = res_doc.json()
                 logging.info(f"[TELEGRAM] Word adjunto enviado a {target_chat}: {res_doc_json.get('ok')} ({res_doc_json.get('description', '')})")
 
+            # 3. Enviar Análisis de Impacto y Consecuencias con Gemini AI (SOLO en mensaje, NO en Word)
+            gemini_html = cyclone_data.get("gemini_analysis_html")
+            if not gemini_html:
+                try:
+                    from gemini_analyzer import generate_gemini_impact_analysis
+                    gemini_html = generate_gemini_impact_analysis(cyclone_data, format_type="html")
+                except Exception as e:
+                    logging.debug(f"[TELEGRAM] No se pudo generar análisis Gemini: {e}")
+                    gemini_html = ""
+
+            if gemini_html:
+                ai_msg = (
+                    f"🤖 <b>EVALUACIÓN DE IMPACTO CFE &mdash; GEMINI AI</b>\n"
+                    f"<i>Consecuencias para infraestructura y Sistema Eléctrico Nacional ({sistema}):</i>\n\n"
+                    f"{gemini_html}"
+                )
+                msg_url = f"{base_url}/sendMessage"
+                res_ai = requests.post(
+                    msg_url,
+                    json={"chat_id": target_chat, "text": ai_msg[:4000], "parse_mode": "HTML"},
+                    timeout=25
+                )
+                logging.info(f"[TELEGRAM] Análisis Gemini enviado a {target_chat}: {res_ai.json().get('ok')}")
+
             any_success = True
         except Exception as e:
             logging.error(f"[TELEGRAM] Error al enviar a destinatario {target_chat}: {e}")
