@@ -260,7 +260,7 @@ def handle_incoming_telegram_update(payload, server_base_url="https://cfe-avisos
         return
 
     menu_text = (
-        f"🤖 <b>Centinela SPH Grijalva &mdash; Menú de Consultas</b>\n\n"
+        f"🤖 <b>Centinela SPH Grijalva — Menú de Consultas</b>\n\n"
         f"Hola <b>{user_name}</b>, estoy a tu disposición con la información técnica del Sistema Hidroeléctrico del Río Grijalva:\n\n"
         f"1️⃣ <b>1</b> - Reporte de Unidades Generadoras\n"
         f"2️⃣ <b>2</b> - Power Monitoring en tiempo real\n"
@@ -272,9 +272,7 @@ def handle_incoming_telegram_update(payload, server_base_url="https://cfe-avisos
         f"11️⃣ <b>11</b> - Reporte de Lluvias 24h (6am a 6am)\n"
         f"12️⃣ <b>12</b> - Reporte de Lluvias Parcial\n"
         f"6️⃣ <b>6</b> o pregunta directa - 🤖 Consulta Técnica con IA\n\n"
-        f"💡 <i>Escribe el número de la opción o envía tu pregunta técnica.</i>\n\n"
-        f"───────────────\n"
-        f"ℹ️ <i>Para tu bot de Trading y Balances Bitso, utiliza: @mibitso_bot</i>"
+        f"💡 <i>Escribe el número de la opción o envía tu pregunta técnica.</i>"
     )
 
     # 1. Menú principal
