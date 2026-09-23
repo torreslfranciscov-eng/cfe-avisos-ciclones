@@ -36,6 +36,25 @@ def _get_api_key():
     return base64.b64decode(b64_token).decode("utf-8")
 
 
+def _extract_category(sistema: str, titular: str = "") -> str:
+    text_eval = f"{sistema} {titular}".upper()
+    if "CATEGORÍA 5" in text_eval or "CAT 5" in text_eval or "CAT. 5" in text_eval or "CAT 5" in text_eval:
+        return "Huracán Categoría 5 (Extrema / Catastrófica)"
+    elif "CATEGORÍA 4" in text_eval or "CAT 4" in text_eval:
+        return "Huracán Categoría 4 (Severa)"
+    elif "CATEGORÍA 3" in text_eval or "CAT 3" in text_eval:
+        return "Huracán Categoría 3 (Mayor)"
+    elif "CATEGORÍA 2" in text_eval or "CAT 2" in text_eval:
+        return "Huracán Categoría 2"
+    elif "CATEGORÍA 1" in text_eval or "CAT 1" in text_eval:
+        return "Huracán Categoría 1"
+    elif "TORMENTA TROPICAL" in text_eval:
+        return "Tormenta Tropical"
+    elif "DEPRESIÓN TROPICAL" in text_eval:
+        return "Depresión Tropical"
+    return "Ciclón Tropical"
+
+
 def generate_gemini_impact_analysis(cyclone_data: dict, format_type: str = "html") -> str:
     """
     Genera una evaluación técnica de impacto operativo e infraestructura para CFE
@@ -58,50 +77,34 @@ def generate_gemini_impact_analysis(cyclone_data: dict, format_type: str = "html
     lluvias = cond.get("pronostico_lluvia", "Sin efectos significativos")
     hora = cond.get("hora_local_gmt", "--")
 
-    # Identificar categoría o severidad
-    text_eval = f"{sistema} {titular}".upper()
-    cat_str = "Ciclón Tropical"
-    if "CATEGORÍA 5" in text_eval or "CAT 5" in text_eval or "CAT. 5" in text_eval:
-        cat_str = "Huracán Categoría 5 (Extrema / Catastrófica)"
-    elif "CATEGORÍA 4" in text_eval or "CAT 4" in text_eval:
-        cat_str = "Huracán Categoría 4 (Severa)"
-    elif "CATEGORÍA 3" in text_eval or "CAT 3" in text_eval:
-        cat_str = "Huracán Categoría 3 (Mayor)"
-    elif "CATEGORÍA 2" in text_eval or "CAT 2" in text_eval:
-        cat_str = "Huracán Categoría 2"
-    elif "CATEGORÍA 1" in text_eval or "CAT 1" in text_eval:
-        cat_str = "Huracán Categoría 1"
-    elif "TORMENTA TROPICAL" in text_eval:
-        cat_str = "Tormenta Tropical"
-    elif "DEPRESIÓN TROPICAL" in text_eval:
-        cat_str = "Depresión Tropical"
+    cat_str = _extract_category(sistema, titular)
 
     prompt = f"""
-Actúa como Especialista Senior en Meteorología Tropical y Protección Civil de la Comisión Federal de Electricidad (CFE).
-El Servicio Meteorológico Nacional (SMN) ha emitido un aviso oficial para el siguiente ciclón tropical:
+Actúa como Especialista en Hidrometeorología y Protección Civil de la Comisión Federal de Electricidad (CFE).
+El Servicio Meteorológico Nacional (SMN) ha publicado el siguiente aviso oficial:
 
 - Sistema: {sistema} ({cat_str})
 - Titular oficial: {titular}
 - Cuenca: {cuenca}
 - Vientos sostenidos: {vientos_sost} km/h | Rachas: {rachas} km/h
-- Presión central mínima: {presion} hPa
-- Ubicación / Distancia a costa: {distancia}
+- Presión central: {presion} hPa
+- Ubicación: {distancia}
 - Desplazamiento: {desplazamiento}
 - Pronóstico de lluvias: {lluvias}
-- Hora de observación: {hora}
 
-Genera un análisis técnico y conciso sobre las CONSECUENCIAS e IMPACTO POTENCIAL en la infraestructura eléctrica y operativa de CFE.
-Estructura la respuesta exactamente en estas 4 secciones concisas:
-1. ⚠️ Nivel de Peligro y Clasificación (evalúa la severidad, especialmente si es Cat 5 o de alta intensidad)
-2. ⚡ Consecuencias en Redes Eléctricas (Transmisión 400/230 kV, Red de Distribución, y subestaciones eléctricas costeras por vientos de {rachas} km/h y marea de tormenta)
-3. 🌊 Riesgo Hidrológico e Hidroeléctrico (impacto por lluvias acumuladas, escurrimientos en cuencas, riesgo para presas hidroeléctricas de la región y deslaves en derechos de vía)
-4. 🛠️ Protocolos y Acciones Operativas CFE Recomendadas (Centros de Operación Estratégica, plantas de emergencia diésel, cuadrillas SUTERM de restablecimiento, torres de emergencia provisionales)
+Genera un resumen técnico, conservador, objetivo y no alarmista para el personal directivo y operativo de CFE.
+REGLA DE TONO: Evita adjetivos exagerados o alarmistas (NO uses palabras como "catastrófico", "destrucción masiva", "colapso inminente" o "extremo"). Usa lenguaje técnico institucional y medido.
 
-Reglas estrictas:
-- Máximo 200 palabras en total.
-- Formato claro con viñetas y emojis.
-- Redacción institucional, técnica y ejecutiva para personal de CFE.
-- No uses formato markdown complejo con asteriscos triples. Usa viñetas limpias con guión.
+Estructura la respuesta en estas 4 secciones concisas:
+1. ℹ️ Estado del Sistema (intensidad, vientos y ubicación según reporte SMN)
+2. ⚡ Consideraciones en Infraestructura Eléctrica (atención preventiva a líneas de Transmisión 400/230 kV, Red de Distribución y subestaciones costeras por la intensidad del viento)
+3. 🌊 Aspectos Hidrológicos (seguimiento a precipitaciones acumuladas y niveles en embalses de la región)
+4. 🛠️ Medidas Operativas CFE (coordinación con el COE, alistamiento de personal CFE/SUTERM y equipo de emergencia)
+
+Reglas:
+- Máximo 180 palabras.
+- Tono puramente técnico, sobrio y profesional.
+- Usa viñetas limpiadas con guión.
 """
 
     api_key = _get_api_key()
@@ -140,21 +143,14 @@ Reglas estrictas:
 
 
 def _build_expert_fallback(sistema, cat_str, vientos, rachas, presion, distancia, lluvias):
-    """Fallback experto basado en normatividad CFE ante fallas de red."""
-    return f"""1. ⚠️ Nivel de Peligro: {sistema} ({cat_str})
-- Vientos extremos de {vientos} km/h y rachas de {rachas} km/h (Presión {presion} hPa). Riesgo crítico para el SEN en zonas costeras a {distancia}.
+    """Fallback técnico basado en normatividad CFE."""
+    return f"""INFORME TÉCNICO HIDROMETEOROLÓGICO Y DE PROTECCIÓN CIVIL - CFE
+Evento: {sistema} ({cat_str})
 
-2. ⚡ Consecuencias en Redes Eléctricas
-- Alto riesgo de colapso mecánico en líneas de transmisión de 400 y 230 kV.
-- Daño severo en postes y alimentadores de distribución por proyectiles y caída de árboles.
-- Riesgo de desconexión preventiva en subestaciones costeras por marea de tormenta y salinidad.
-
-3. 🌊 Riesgo Hidrológico e Hidroeléctrico
-- Precipitaciones extraordinarias ({lluvias}) generan saturación de suelo, deslaves sobre derechos de vía e incremento en aportaciones a presas hidroeléctricas.
-
-4. 🛠️ Protocolos Operativos CFE
-- Activación inmediata de Centros de Operación Estratégica (COE).
-- Movilización preventiva de cuadrillas SUTERM, torres provisionales y plantas móviles de emergencia a zonas seguras colindantes."""
+- Estado del Sistema: Ubicado a {distancia}. Registra vientos sostenidos de {vientos} km/h, rachas de {rachas} km/h y presión de {presion} hPa.
+- Consideraciones en Infraestructura Eléctrica: Atención preventiva a infraestructura de transmisión (400 y 230 kV), redes de distribución y subestaciones en la zona de influencia por ráfagas de viento.
+- Aspectos Hidrológicos: Pronóstico de {lluvias}. Monitoreo a escurrimientos y almacenamiento en embalses de la región.
+- Medidas Operativas CFE: Coordinación con el COE, alistamiento estratégico de cuadrillas CFE/SUTERM, plantas de emergencia y torres provisionales en zonas de seguridad."""
 
 
 def _format_to_html(text: str) -> str:
@@ -180,3 +176,49 @@ def _format_to_markdown(text: str) -> str:
     text = re.sub(r'<b>(.*?)</b>', r'*\1*', text)
     text = re.sub(r'<i>(.*?)</i>', r'_\1_', text)
     return text
+
+
+def generate_siatct_alert_analysis(cyclone_data: dict, format_type: str = "html") -> str:
+    """Genera aviso especializado del Sistema de Alerta Temprana SIAT-CT para Protección Civil CFE."""
+    sistema = cyclone_data.get("sistema", "Ciclón Tropical")
+    cond = cyclone_data.get("condiciones", {})
+    distancia = cond.get("distancia_costa", "--")
+    vientos = cond.get("vientos_sostenidos", "--")
+    rachas = cond.get("vientos_rachas", "--")
+
+    cat_str = _extract_category(sistema, titular=cyclone_data.get("titular", ""))
+    nivel_alerta = "🔴 ALERTA ROJA (Fase de Inminencia)" if ("5" in cat_str or "4" in cat_str) else "🟠 ALERTA NARANJA (Fase de Preparación)"
+
+    text = f"""🛡️ <b>SEGUIMIENTO SIAT-CT &mdash; CFE PROTECCIÓN CIVIL</b>
+📍 <b>Sistema:</b> {sistema} ({cat_str})
+📌 <b>Ubicación:</b> {distancia}
+💨 <b>Condición Eólica:</b> Vientos {vientos} km/h | Rachas {rachas} km/h
+🏷️ <b>Nivel de Alerta:</b> {nivel_alerta}
+
+📋 <b>Medidas Preventivas Institucionales:</b>
+&bull; Coordinación operativa permanente con las autoridades de Protección Civil.
+&bull; Resguardo preventivo de personal de campo e infraestructura móvil en zonas seguras.
+&bull; Monitoreo continuo de canales de comunicación VHF/HF y plantas eléctricas portátiles."""
+
+    return _format_to_html(text) if format_type == "html" else _format_to_markdown(text)
+
+
+def generate_hydrological_basin_analysis(cyclone_data: dict, format_type: str = "html") -> str:
+    """Genera boletín de alerta hidrológica por cuencas y presas CFE."""
+    sistema = cyclone_data.get("sistema", "Ciclón Tropical")
+    cond = cyclone_data.get("condiciones", {})
+    lluvias = cond.get("pronostico_lluvia", "Lluvias en la región")
+
+    text = f"""🌊 <b>SEGUIMIENTO HIDROLÓGICO Y EMBALSES CFE</b>
+🌀 <b>Sistema:</b> {sistema}
+🌧️ <b>Precipitación Prevista:</b> {lluvias}
+
+🏔️ <b>Cuencas bajo Seguimiento:</b> Río Balsas, Papagayo, Armería y Coahuayana.
+🏗️ <b>Monitoreo Técnico de Presas (Gerencia de Ingeniería Civil):</b>
+&bull; <b>Presa Infiernillo:</b> Seguimiento continuo a niveles y curvas de almacenamiento.
+&bull; <b>Presa La Villita:</b> Verificación de capacidad operacional en desembocadura.
+&bull; <b>Presa El Caracol:</b> Control rutinario de avenidas en cuenca alta.
+
+ℹ️ Inspección preventiva en estructuras de transmisión adyacentes a cauces principales."""
+
+    return _format_to_html(text) if format_type == "html" else _format_to_markdown(text)
