@@ -5,10 +5,44 @@ a un Canal o Grupo de Telegram con imágenes (satélite y cono de trayectoria)
 y el archivo Word (.docx) adjunto.
 """
 
+import re
 import os
 import json
 import logging
 import requests
+
+
+def safe_html_truncate(text, max_len=1024):
+    """
+    Trunca texto con formato HTML de manera segura sin romper etiquetas
+    ni entidades y cerrando automáticamente cualquier etiqueta HTML abierta.
+    """
+    if not text or len(text) <= max_len:
+        return text or ""
+
+    cutoff = max_len - 25
+    idx = text.rfind("\n", 0, cutoff)
+    if idx == -1 or idx < cutoff // 2:
+        idx = text.rfind(" ", 0, cutoff)
+    if idx == -1:
+        idx = cutoff
+    truncated = text[:idx].strip()
+
+    # Detectar etiquetas HTML abiertas y cerrarlas en orden inverso
+    open_tags = []
+    tag_regex = re.compile(r'<(/)?([a-zA-Z0-9]+)[^>]*>')
+    for match in tag_regex.finditer(truncated):
+        is_closing, tag_name = match.group(1), match.group(2).lower()
+        if is_closing:
+            if open_tags and open_tags[-1] == tag_name:
+                open_tags.pop()
+        else:
+            open_tags.append(tag_name)
+
+    for tag in reversed(open_tags):
+        truncated += f"</{tag}>"
+
+    return truncated
 
 
 def send_cyclone_telegram(cyclone_data, docx_path):
@@ -66,6 +100,17 @@ def send_cyclone_telegram(cyclone_data, docx_path):
         except Exception as e:
             logging.error(f"[TELEGRAM] Error leyendo satélite {img_sat_path}: {e}")
 
+    # Descarga directa de respaldo si el archivo satelital no está en disco
+    img_sat_url = cyclone_data.get("img_sat_url")
+    if not sat_bytes and img_sat_url:
+        try:
+            logging.info(f"[TELEGRAM] Descargando imagen satelital de respaldo desde {img_sat_url}...")
+            r_sat = requests.get(img_sat_url, timeout=25, verify=False)
+            if r_sat.status_code == 200 and len(r_sat.content) > 1000:
+                sat_bytes = r_sat.content
+        except Exception as e:
+            logging.error(f"[TELEGRAM] Error descargando imagen satelital de respaldo: {e}")
+
     tray_bytes = None
     if img_tray_path and os.path.exists(img_tray_path):
         try:
@@ -73,6 +118,17 @@ def send_cyclone_telegram(cyclone_data, docx_path):
                 tray_bytes = f.read()
         except Exception as e:
             logging.error(f"[TELEGRAM] Error leyendo trayectoria {img_tray_path}: {e}")
+
+    # Descarga directa de respaldo si el cono de trayectoria no está en disco
+    img_tray_url = cyclone_data.get("img_tray_url")
+    if not tray_bytes and img_tray_url:
+        try:
+            logging.info(f"[TELEGRAM] Descargando imagen trayectoria de respaldo desde {img_tray_url}...")
+            r_tray = requests.get(img_tray_url, timeout=25, verify=False)
+            if r_tray.status_code == 200 and len(r_tray.content) > 1000:
+                tray_bytes = r_tray.content
+        except Exception as e:
+            logging.error(f"[TELEGRAM] Error descargando imagen trayectoria de respaldo: {e}")
 
     doc_bytes = None
     if os.path.exists(docx_path):
@@ -82,42 +138,76 @@ def send_cyclone_telegram(cyclone_data, docx_path):
         except Exception as e:
             logging.error(f"[TELEGRAM] Error leyendo docx {docx_path}: {e}")
 
+    photo_caption = safe_html_truncate(caption, max_len=1024)
     any_success = False
+
     for target_chat in chat_ids:
         try:
-            # 1. Enviar Álbum de Fotos (Satélite + Trayectoria) con el texto del aviso
-            media = []
-            files = {}
-            if sat_bytes:
-                files["sat"] = ("sat.png", sat_bytes, "image/png")
-                media.append({
-                    "type": "photo",
-                    "media": "attach://sat",
-                    "caption": caption[:1024],
-                    "parse_mode": "HTML"
-                })
+            photos_sent = False
 
-            if tray_bytes:
-                files["tray"] = ("tray.png", tray_bytes, "image/png")
-                media.append({
-                    "type": "photo",
-                    "media": "attach://tray"
-                })
+            # Caso 1: Si hay ambas fotos, enviar Álbum (sendMediaGroup)
+            if sat_bytes and tray_bytes:
+                media = [
+                    {
+                        "type": "photo",
+                        "media": "attach://sat",
+                        "caption": photo_caption,
+                        "parse_mode": "HTML"
+                    },
+                    {
+                        "type": "photo",
+                        "media": "attach://tray"
+                    }
+                ]
+                files = {
+                    "sat": ("sat.jpg", sat_bytes, "image/jpeg"),
+                    "tray": ("tray.jpg", tray_bytes, "image/jpeg")
+                }
+                try:
+                    media_url = f"{base_url}/sendMediaGroup"
+                    res_media = requests.post(
+                        media_url,
+                        data={"chat_id": target_chat, "media": json.dumps(media)},
+                        files=files,
+                        timeout=35
+                    )
+                    res_json = res_media.json()
+                    if res_json.get("ok"):
+                        photos_sent = True
+                        logging.info(f"[TELEGRAM] Álbum de fotos de {sistema} enviado a {target_chat}")
+                    else:
+                        logging.warning(f"[TELEGRAM] sendMediaGroup falló ({res_json.get('description')}). Reintentando fotos individuales...")
+                except Exception as e:
+                    logging.warning(f"[TELEGRAM] Excepción en sendMediaGroup: {e}")
 
-            if media:
-                media_url = f"{base_url}/sendMediaGroup"
-                res_media = requests.post(
-                    media_url,
-                    data={"chat_id": target_chat, "media": json.dumps(media)},
-                    files=files,
-                    timeout=35
-                )
-                res_json = res_media.json()
-                logging.info(f"[TELEGRAM] Fotos enviadas a {target_chat}: {res_json.get('ok')} ({res_json.get('description', '')})")
-            else:
+            # Caso 2: Si sendMediaGroup falló o solo hay 1 foto disponible
+            if not photos_sent and (sat_bytes or tray_bytes):
+                primary_photo = tray_bytes or sat_bytes
+                secondary_photo = sat_bytes if tray_bytes else None
+
+                try:
+                    photo_url = f"{base_url}/sendPhoto"
+                    files_p = {"photo": ("foto_principal.jpg", primary_photo, "image/jpeg")}
+                    data_p = {"chat_id": target_chat, "caption": photo_caption, "parse_mode": "HTML"}
+                    res_p = requests.post(photo_url, data=data_p, files=files_p, timeout=35).json()
+                    if res_p.get("ok"):
+                        photos_sent = True
+                        logging.info(f"[TELEGRAM] Foto principal enviada a {target_chat}")
+                    else:
+                        logging.warning(f"[TELEGRAM] Error en sendPhoto: {res_p.get('description')}")
+
+                    if secondary_photo and photos_sent:
+                        files_s = {"photo": ("foto_secundaria.jpg", secondary_photo, "image/jpeg")}
+                        data_s = {"chat_id": target_chat, "caption": "🛰️ <b>Imagen Satelital Oficial</b>", "parse_mode": "HTML"}
+                        requests.post(photo_url, data=data_s, files=files_s, timeout=30)
+                except Exception as e:
+                    logging.error(f"[TELEGRAM] Excepción al enviar fotos individuales: {e}")
+
+            # Caso 3: Si no se pudo enviar ninguna foto, enviar texto con sendMessage
+            if not photos_sent:
                 msg_url = f"{base_url}/sendMessage"
                 res_msg = requests.post(msg_url, json={"chat_id": target_chat, "text": caption, "parse_mode": "HTML"}, timeout=20)
-                logging.info(f"[TELEGRAM] Mensaje enviado a {target_chat}: {res_msg.json().get('ok')}")
+                logging.info(f"[TELEGRAM] Mensaje de texto enviado a {target_chat}: {res_msg.json().get('ok')}")
 
             # 2. Enviar el Documento Word (.docx) oficial adjunto
             if doc_bytes:
@@ -337,10 +427,27 @@ def handle_incoming_telegram_update(payload, server_base_url="https://cfe-avisos
                 tray_path = c.get("img_tray_path")
                 sat_path = c.get("img_sat_path")
                 img_path = tray_path if (tray_path and os.path.exists(tray_path)) else (sat_path if (sat_path and os.path.exists(sat_path)) else None)
+                img_bytes = None
                 if img_path:
                     try:
                         with open(img_path, "rb") as f_img:
-                            send_telegram_photo(chat_id, f_img.read(), f"🗺️ <b>Cono de Trayectoria:</b> {c.get('sistema', 'Ciclón Tropical')}")
+                            img_bytes = f_img.read()
+                    except Exception as e:
+                        logging.debug(f"[TELEGRAM] Error al leer imagen de disco: {e}")
+
+                if not img_bytes:
+                    dl_url = c.get("img_tray_url") or c.get("img_sat_url")
+                    if dl_url:
+                        try:
+                            r_dl = requests.get(dl_url, timeout=20, verify=False)
+                            if r_dl.status_code == 200 and len(r_dl.content) > 1000:
+                                img_bytes = r_dl.content
+                        except Exception as e:
+                            logging.debug(f"[TELEGRAM] Error al descargar imagen de ciclón para opción 8: {e}")
+
+                if img_bytes:
+                    try:
+                        send_telegram_photo(chat_id, img_bytes, f"🗺️ <b>Cono de Trayectoria / Satélite:</b> {c.get('sistema', 'Ciclón Tropical')}")
                     except Exception as e:
                         logging.debug(f"[TELEGRAM] Error al enviar foto de ciclón: {e}")
 

@@ -156,13 +156,18 @@ def send_cyclone_teams(cyclone_data, docx_path=None):
                     "type": "TextBlock",
                     "text": "🛰️ **Imagen Satelital**",
                     "horizontalAlignment": "Center",
-                    "size": "Small"
+                    "size": "Small",
+                    "weight": "Bolder"
                 },
                 {
                     "type": "Image",
                     "url": img_sat_url,
-                    "altText": "Imagen Satelital",
-                    "size": "Auto"
+                    "altText": "Imagen Satelital Oficial",
+                    "size": "Stretch",
+                    "selectAction": {
+                        "type": "Action.OpenUrl",
+                        "url": img_sat_url
+                    }
                 }
             ]
         })
@@ -175,13 +180,18 @@ def send_cyclone_teams(cyclone_data, docx_path=None):
                     "type": "TextBlock",
                     "text": "🗺️ **Cono de Trayectoria**",
                     "horizontalAlignment": "Center",
-                    "size": "Small"
+                    "size": "Small",
+                    "weight": "Bolder"
                 },
                 {
                     "type": "Image",
                     "url": img_tray_url,
-                    "altText": "Cono de Trayectoria",
-                    "size": "Auto"
+                    "altText": "Cono de Trayectoria Oficial",
+                    "size": "Stretch",
+                    "selectAction": {
+                        "type": "Action.OpenUrl",
+                        "url": img_tray_url
+                    }
                 }
             ]
         })

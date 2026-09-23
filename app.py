@@ -501,6 +501,27 @@ def media_azure_blob(container, blob_name):
     return Response(data, mimetype=mimetype)
 
 
+@app.route("/media/cyclone/<path:filename>", methods=["GET"])
+def media_cyclone(filename):
+    """Sirve imágenes de satélite y trayectoria descargadas localmente."""
+    temp_dir = os.path.abspath(os.getenv("TEMP_IMAGES_DIR", "temp_images"))
+    file_path = os.path.join(temp_dir, filename)
+    if not os.path.exists(file_path):
+        return "Imagen no encontrada", 404
+    mimetype = "image/jpeg"
+    if filename.endswith(".png"):
+        mimetype = "image/png"
+    try:
+        with open(file_path, "rb") as f:
+            data = f.read()
+        resp = Response(data, mimetype=mimetype)
+        resp.headers["Access-Control-Allow-Origin"] = "*"
+        resp.headers["Cache-Control"] = "public, max-age=3600"
+        return resp
+    except Exception as e:
+        return f"Error leyendo imagen: {e}", 500
+
+
 @app.route("/health")
 def health():
     return jsonify({"status": "healthy"}), 200

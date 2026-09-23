@@ -52,6 +52,33 @@ def send_cyclone_whatsapp(cyclone_data, docx_path):
     recipients = [r.strip() for r in target_to.split(",") if r.strip()]
     success_count = 0
 
+    # Asegurar que las imágenes existan en disco si están disponibles en URL
+    temp_dir = os.path.abspath(os.getenv("TEMP_IMAGES_DIR", "temp_images"))
+    os.makedirs(temp_dir, exist_ok=True)
+    aviso_id = cyclone_data.get("aviso_id", "temp")
+
+    if (not img_sat_path or not os.path.exists(img_sat_path)) and cyclone_data.get("img_sat_url"):
+        try:
+            dest_sat = os.path.join(temp_dir, f"sat_{cyclone_data.get('basin_key', 'pacifico')}_{aviso_id}.jpg")
+            r_sat = requests.get(cyclone_data["img_sat_url"], timeout=20, verify=False)
+            if r_sat.status_code == 200 and len(r_sat.content) > 1000:
+                with open(dest_sat, "wb") as f:
+                    f.write(r_sat.content)
+                img_sat_path = dest_sat
+        except Exception as e:
+            logging.debug(f"[WHATSAPP] Error descargando satélite de respaldo: {e}")
+
+    if (not img_tray_path or not os.path.exists(img_tray_path)) and cyclone_data.get("img_tray_url"):
+        try:
+            dest_tray = os.path.join(temp_dir, f"tray_{cyclone_data.get('basin_key', 'pacifico')}_{aviso_id}.jpg")
+            r_tray = requests.get(cyclone_data["img_tray_url"], timeout=20, verify=False)
+            if r_tray.status_code == 200 and len(r_tray.content) > 1000:
+                with open(dest_tray, "wb") as f:
+                    f.write(r_tray.content)
+                img_tray_path = dest_tray
+        except Exception as e:
+            logging.debug(f"[WHATSAPP] Error descargando trayectoria de respaldo: {e}")
+
     for recipient in recipients:
         try:
             payload = {

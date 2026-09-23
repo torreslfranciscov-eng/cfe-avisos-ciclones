@@ -6,12 +6,35 @@ Soporta Océano Pacífico y Océano Atlántico.
 
 import os
 import re
+import time
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+def download_image_with_retry(url, dest_path, retries=3, delay=2):
+    """
+    Descarga una imagen con reintentos para asegurar que no se pierda por latencia
+    o demora en la publicación del archivo en los servidores de CONAGUA / SMN.
+    """
+    if not url:
+        return None
+    for attempt in range(1, retries + 1):
+        try:
+            res = requests.get(url, headers=HEADERS, timeout=25, verify=False)
+            if res.status_code == 200 and len(res.content) > 1000:
+                with open(dest_path, "wb") as f:
+                    f.write(res.content)
+                return os.path.abspath(dest_path)
+            else:
+                print(f"[WARN] Intento {attempt}/{retries} fallo descargando {url} (Status: {res.status_code}, Bytes: {len(res.content)})")
+        except Exception as e:
+            print(f"[WARN] Intento {attempt}/{retries} error descargando {url}: {e}")
+        if attempt < retries:
+            time.sleep(delay)
+    return None
 
 BASE_URL = "https://smn.conagua.gob.mx/tools/GUI/PortalLaravel/public/"
 
@@ -213,40 +236,33 @@ def fetch_cyclone_data(aviso_id, basin_key="pacifico", download_images=True, out
     img_tray_url = None
     
     for img in soup.find_all("img"):
-        src = img.get("src", "")
-        if "ImgSat" in src:
+        src = img.get("src", "") or img.get("data-src", "")
+        alt = (img.get("alt", "") or "").lower()
+        src_lower = src.lower()
+        if "imgsat" in src_lower or "satelite" in alt or "satélite" in alt:
             img_sat_url = urljoin(BASE_URL, src)
-        elif "ImgTray" in src:
+        elif "imgtray" in src_lower or "trayectoria" in alt or "cono" in alt:
             img_tray_url = urljoin(BASE_URL, src)
 
     img_sat_path = None
     img_tray_path = None
     
     if download_images:
-        os.makedirs(output_dir, exist_ok=True)
+        abs_output_dir = os.path.abspath(output_dir)
+        os.makedirs(abs_output_dir, exist_ok=True)
         if img_sat_url:
             sat_filename = f"sat_{basin_key}_{aviso_id}.jpg"
-            img_sat_path = os.path.join(output_dir, sat_filename)
-            try:
-                res_img = requests.get(img_sat_url, headers=HEADERS, timeout=20, verify=False)
-                if res_img.status_code == 200:
-                    with open(img_sat_path, "wb") as f:
-                        f.write(res_img.content)
-            except Exception as e:
-                print(f"[WARN] No se pudo descargar imagen satélite: {e}")
-                img_sat_path = None
+            dest_sat = os.path.join(abs_output_dir, sat_filename)
+            img_sat_path = download_image_with_retry(img_sat_url, dest_sat, retries=3, delay=2)
+            if not img_sat_path:
+                print(f"[WARN] No se pudo descargar imagen satélite tras reintentos: {img_sat_url}")
                 
         if img_tray_url:
             tray_filename = f"tray_{basin_key}_{aviso_id}.jpg"
-            img_tray_path = os.path.join(output_dir, tray_filename)
-            try:
-                res_img = requests.get(img_tray_url, headers=HEADERS, timeout=20, verify=False)
-                if res_img.status_code == 200:
-                    with open(img_tray_path, "wb") as f:
-                        f.write(res_img.content)
-            except Exception as e:
-                print(f"[WARN] No se pudo descargar imagen trayectoria: {e}")
-                img_tray_path = None
+            dest_tray = os.path.join(abs_output_dir, tray_filename)
+            img_tray_path = download_image_with_retry(img_tray_url, dest_tray, retries=3, delay=2)
+            if not img_tray_path:
+                print(f"[WARN] No se pudo descargar imagen trayectoria tras reintentos: {img_tray_url}")
 
     # Extraer nombre limpio y número de aviso
     nombre_limpio = sistema_text

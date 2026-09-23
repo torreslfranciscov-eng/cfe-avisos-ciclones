@@ -391,15 +391,32 @@ def handle_incoming_whatsapp_message(payload):
                 tray_path = c.get("img_tray_path")
                 sat_path = c.get("img_sat_path")
                 img_to_send = tray_path if (tray_path and os.path.exists(tray_path)) else (sat_path if (sat_path and os.path.exists(sat_path)) else None)
+                img_bytes = None
                 if img_to_send:
                     try:
                         with open(img_to_send, "rb") as f_img:
-                            send_wa_image_base64(
-                                from_jid,
-                                f_img.read(),
-                                f"🗺️ *Cono de Trayectoria / Satélite:* {c.get('sistema', 'Ciclón Tropical')}",
-                                "trayectoria_ciclon.png"
-                            )
+                            img_bytes = f_img.read()
+                    except Exception as e:
+                        logging.debug(f"[CENTINELA] Error leyendo archivo de imagen: {e}")
+
+                if not img_bytes:
+                    dl_url = c.get("img_tray_url") or c.get("img_sat_url")
+                    if dl_url:
+                        try:
+                            r_dl = requests.get(dl_url, timeout=20, verify=False)
+                            if r_dl.status_code == 200 and len(r_dl.content) > 1000:
+                                img_bytes = r_dl.content
+                        except Exception as e:
+                            logging.debug(f"[CENTINELA] Error descargando imagen de ciclón para WhatsApp: {e}")
+
+                if img_bytes:
+                    try:
+                        send_wa_image_base64(
+                            from_jid,
+                            img_bytes,
+                            f"🗺️ *Cono de Trayectoria / Satélite:* {c.get('sistema', 'Ciclón Tropical')}",
+                            "trayectoria_ciclon.png"
+                        )
                     except Exception as e:
                         logging.debug(f"[CENTINELA] No se pudo enviar imagen de ciclón a WhatsApp: {e}")
 
@@ -717,9 +734,17 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
             body.append({
                 "type": "Image",
                 "url": img_tray_url,
-                "altText": "Cono de Trayectoria",
-                "size": "Auto",
+                "altText": "Cono de Trayectoria Oficial",
+                "size": "Stretch",
                 "selectAction": {"type": "Action.OpenUrl", "url": img_tray_url}
+            })
+        if c.get("img_sat_url"):
+            body.append({
+                "type": "Image",
+                "url": c["img_sat_url"],
+                "altText": "Imagen Satelital Oficial",
+                "size": "Stretch",
+                "selectAction": {"type": "Action.OpenUrl", "url": c["img_sat_url"]}
             })
 
         if proximo:
