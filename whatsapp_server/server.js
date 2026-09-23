@@ -385,15 +385,6 @@ app.post('/sendCycloneNotice', async (req, res) => {
             results.push({ type: 'doc', resDoc });
         }
 
-        // 4. Análisis de Impacto CFE con Gemini AI (SOLO en mensaje, NO en Word)
-        const geminiText = req.body.geminiAnalysis;
-        if (geminiText) {
-            const aiMsg = `🤖 *EVALUACIÓN DE IMPACTO CFE — GEMINI AI*\n_Consecuencias para infraestructura y Sistema Eléctrico:_\n\n${geminiText}`;
-            const resAi = await waSock.sendMessage(jid, { text: aiMsg });
-            if (resAi?.key?.id) botSentMessageIds.add(resAi.key.id);
-            results.push({ type: 'gemini_ai', resAi });
-        }
-
         res.json({ ok: true, recipient: jid, results });
     } catch (err) {
         console.error('Error in sendCycloneNotice:', err);

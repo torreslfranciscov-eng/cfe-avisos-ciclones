@@ -91,27 +91,6 @@ def send_cyclone_email(cyclone_data, docx_path):
             </tr>
         </table>
         """
-    gemini_html = cyclone_data.get("gemini_analysis_html")
-    if not gemini_html:
-        try:
-            from gemini_analyzer import generate_gemini_impact_analysis
-            gemini_html = generate_gemini_impact_analysis(cyclone_data, format_type="html")
-        except Exception as e:
-            logging.debug(f"[EMAIL] No se pudo generar análisis Gemini: {e}")
-            gemini_html = ""
-
-    gemini_block_html = ""
-    if gemini_html:
-        gemini_block_html = f"""
-        <div style="margin-top: 16px; background: #fffdf5; border-left: 4px solid #d97706; padding: 14px; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
-            <div style="font-weight: bold; color: #b45309; font-size: 14px; margin-bottom: 8px;">
-                🤖 EVALUACIÓN DE IMPACTO CFE &mdash; GEMINI AI (Solo informativo en mensaje)
-            </div>
-            <div style="font-size: 13px; line-height: 1.5; color: #2d3748;">
-                {gemini_html}
-            </div>
-        </div>
-        """
 
     html_body = f"""
     <!DOCTYPE html>
@@ -162,8 +141,6 @@ def send_cyclone_email(cyclone_data, docx_path):
             <div style="margin-top: 16px; background: #eef7f4; padding: 10px; border-radius: 4px; font-size: 12px; color: #1E5B4F; font-weight: bold;">
                 🔔 {proximo}
             </div>
-
-            {gemini_block_html}
 
             <div style="margin-top: 16px; font-size: 13px;">
                 📎 <strong>Archivo adjunto:</strong> Se adjunta el reporte oficial completo en formato Word (<code>{filename}</code>).

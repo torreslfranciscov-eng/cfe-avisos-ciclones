@@ -18,7 +18,6 @@ from email_sender import send_cyclone_email, send_whatsapp_disconnected_alert
 from telegram_sender import send_cyclone_telegram, handle_incoming_telegram_update
 from whatsapp_sender import send_cyclone_whatsapp
 from teams_sender import send_cyclone_teams
-from gemini_analyzer import generate_gemini_impact_analysis
 from centinela_bot import handle_incoming_whatsapp_message, handle_incoming_teams_message, get_azure_blob_bytes
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -97,16 +96,6 @@ def run_cycle_check(force=False):
         if data:
             doc_path = generate_word_report(data, output_dir=REPORTS_DIR)
             filename = os.path.basename(doc_path)
-
-            # Generar Análisis de Consecuencias con Gemini AI (SOLO para mensajes, NO para Word)
-            try:
-                logging.info(f"[GEMINI] Generando análisis de impacto para {label}...")
-                data["gemini_analysis_html"] = generate_gemini_impact_analysis(data, format_type="html")
-                data["gemini_analysis_md"] = generate_gemini_impact_analysis(data, format_type="markdown")
-            except Exception as e:
-                logging.error(f"[GEMINI] Error al generar análisis de impacto: {e}")
-                data["gemini_analysis_html"] = ""
-                data["gemini_analysis_md"] = ""
 
             email_sent = send_cyclone_email(data, doc_path)
             telegram_sent = send_cyclone_telegram(data, doc_path)

@@ -54,22 +54,12 @@ def send_cyclone_whatsapp(cyclone_data, docx_path):
 
     for recipient in recipients:
         try:
-            gemini_md = cyclone_data.get("gemini_analysis_md")
-            if not gemini_md:
-                try:
-                    from gemini_analyzer import generate_gemini_impact_analysis
-                    gemini_md = generate_gemini_impact_analysis(cyclone_data, format_type="markdown")
-                except Exception as e:
-                    logging.debug(f"[WHATSAPP] No se pudo generar análisis Gemini: {e}")
-                    gemini_md = ""
-
             payload = {
                 "to": recipient,
                 "caption": caption,
                 "satPath": os.path.abspath(img_sat_path) if img_sat_path and os.path.exists(img_sat_path) else None,
                 "trayPath": os.path.abspath(img_tray_path) if img_tray_path and os.path.exists(img_tray_path) else None,
-                "docxPath": os.path.abspath(docx_path) if docx_path and os.path.exists(docx_path) else None,
-                "geminiAnalysis": gemini_md
+                "docxPath": os.path.abspath(docx_path) if docx_path and os.path.exists(docx_path) else None
             }
 
             res = requests.post(f"{openwa_url}/sendCycloneNotice", json=payload, timeout=40)
