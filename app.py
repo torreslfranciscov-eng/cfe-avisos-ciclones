@@ -34,8 +34,9 @@ app = Flask(__name__)
 def add_teams_embed_headers(response):
     """Permite que Teams embeba el dashboard como Tab (iframe) dentro de un canal."""
     response.headers['Content-Security-Policy'] = (
-        "frame-ancestors 'self' https://teams.microsoft.com https://*.teams.microsoft.com "
-        "https://*.skype.com https://*.microsoft.com"
+        "frame-ancestors 'self' https://*.teams.microsoft.com https://teams.microsoft.com "
+        "https://*.cloud.microsoft https://teams.cloud.microsoft "
+        "https://*.microsoft.com https://*.office.com https://*.office365.com https://*.sharepoint.com;"
     )
     response.headers.pop('X-Frame-Options', None)
     return response
@@ -360,6 +361,14 @@ def teams_dashboard():
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Centinela Dashboard — SPH Grijalva</title>
+        <script src="https://res.cdn.office.net/teams-js/2.22.0/js/MicrosoftTeams.min.js"></script>
+        <script>
+            document.addEventListener('DOMContentLoaded', function() {
+                if (window.microsoftTeams) {
+                    try { microsoftTeams.app.initialize(); } catch(e) {}
+                }
+            });
+        </script>
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
         <style>
             :root {
