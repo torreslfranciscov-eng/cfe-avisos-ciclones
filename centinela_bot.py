@@ -516,7 +516,7 @@ def _make_button(title, command):
             "msteams": {
                 "type": "messageBack",
                 "text": str(command),
-                "displayText": title
+                "displayText": str(command)
             },
             "command": str(command)
         }
@@ -669,7 +669,7 @@ def _build_captura_card(user_name="Ingeniero(a)"):
                 "msteams": {
                     "type": "messageBack",
                     "text": "submit_captura",
-                    "displayText": "Registrar Reporte de Guardia"
+                    "displayText": "submit_captura"
                 },
                 "command": "submit_captura"
             }
