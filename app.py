@@ -16,7 +16,7 @@ try:
     load_dotenv()
 except ImportError:
     pass
-from flask import Flask, jsonify, request, send_from_directory, render_template_string, Response
+from flask import Flask, jsonify, request, send_from_directory, render_template_string, Response, send_file
 from smn_scraper import get_active_cyclones, fetch_cyclone_data
 from report_generator import generate_word_report
 from email_sender import send_cyclone_email, send_whatsapp_disconnected_alert
@@ -344,6 +344,7 @@ def index():
 def teams_dashboard():
     """Dashboard operativo dedicado para embeber como Tab fijo en Microsoft Teams."""
     from datetime import datetime, timezone, timedelta
+    from centinela_bot import generate_blob_sas_url
     zona_mx = timezone(timedelta(hours=-6))
     ahora = datetime.now(zona_mx).strftime("%d/%m/%Y %H:%M CST")
 
@@ -353,6 +354,66 @@ def teams_dashboard():
         ciclones = get_active_cyclones() or []
     except Exception:
         ciclones = []
+
+    # Cargar registros de guardia capturados
+    capturas_file = os.path.join(os.path.dirname(__file__), "capturas_guardia.json")
+    capturas = []
+    if os.path.exists(capturas_file):
+        try:
+            with open(capturas_file, "r", encoding="utf-8") as f:
+                capturas = json.load(f)
+        except Exception:
+            capturas = []
+
+    # Calcular KPIs a partir de la última captura o valores agregados
+    kpi_mw = "—"
+    kpi_unidades = "—"
+    kpi_aportacion = "—"
+    kpi_central = "Sin registros recientes"
+
+    if capturas:
+        ultima = capturas[-1]
+        kpi_mw = ultima.get("generacion") or "—"
+        kpi_unidades = ultima.get("unidades") or "—"
+        kpi_aportacion = ultima.get("aportacion") or "—"
+        kpi_central = f"Último reporte: {ultima.get('central', 'Central')} ({ultima.get('timestamp', '')})"
+
+    # Generar URLs seguras SAS para reportes gráficos
+    server_base = request.host_url.rstrip("/")
+    img_unidades = generate_blob_sas_url("unidades", "9c8a7f42-3d91-4e01-a3fa-0d2e5b1c6f7d.png") or f"{server_base}/media/azure/unidades/9c8a7f42-3d91-4e01-a3fa-0d2e5b1c6f7d.png"
+    img_power = generate_blob_sas_url("unidades", "6f3b2c91-91df-41b6-9a1e-c3f0d0c8e24a.png") or f"{server_base}/media/azure/unidades/6f3b2c91-91df-41b6-9a1e-c3f0d0c8e24a.png"
+    img_embalses = generate_blob_sas_url("unidades", "e1a5f734-9c2e-4b3b-8d5a-6f7e1d2c9b8f.png") or f"{server_base}/media/azure/unidades/e1a5f734-9c2e-4b3b-8d5a-6f7e1d2c9b8f.png"
+    img_lluvias = generate_blob_sas_url("unidades", "reporte_lluvia_1_1_638848218556433423.png") or f"{server_base}/media/azure/unidades/reporte_lluvia_1_1_638848218556433423.png"
+
+    # Construir filas de la bitácora
+    filas_html = ""
+    if capturas:
+        for c in reversed(capturas[-25:]):  # Últimos 25 registros
+            filas_html += f"""
+            <tr>
+                <td style="white-space:nowrap;font-weight:600;color:var(--accent-green);">{c.get('timestamp', '—')}</td>
+                <td style="font-weight:500;">{c.get('usuario', '—')}</td>
+                <td><span class="badge badge-blue">{c.get('central', '—')}</span></td>
+                <td style="text-align:right;">{c.get('nivel', '—')}</td>
+                <td style="text-align:right;color:var(--accent-cyan);">{c.get('aportacion', '—')}</td>
+                <td style="text-align:right;">{c.get('extraccion', '—')}</td>
+                <td style="text-align:right;">{c.get('turbinado', '—')}</td>
+                <td style="text-align:right;font-weight:700;color:var(--accent-green);">{c.get('generacion', '—')}</td>
+                <td>{c.get('unidades', '—')}</td>
+                <td style="color:var(--text-secondary);font-size:0.85rem;">{c.get('observaciones', '—')}</td>
+            </tr>
+            """
+    else:
+        filas_html = """
+        <tr>
+            <td colspan="10" style="text-align:center;padding:2.5rem;color:var(--text-muted);">
+                📋 No hay tomas de datos de guardia registradas aún hoy.<br>
+                <span style="font-size:0.85rem;color:var(--text-secondary);">
+                    Para registrar una guardia desde Teams, escribe <b>@centinelaSph 9</b> en el canal de Cuenca Grijalva.
+                </span>
+            </td>
+        </tr>
+        """
 
     html = """
     <!DOCTYPE html>
@@ -369,21 +430,21 @@ def teams_dashboard():
                 }
             });
         </script>
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
         <style>
             :root {
-                --bg-primary: #0f1923;
-                --bg-card: #1a2736;
-                --bg-card-hover: #1e2f40;
-                --accent-green: #00c896;
+                --bg-primary: #0b131e;
+                --bg-card: #152232;
+                --bg-card-hover: #1c2d42;
+                --accent-green: #10b981;
                 --accent-blue: #3b82f6;
                 --accent-amber: #f59e0b;
                 --accent-red: #ef4444;
                 --accent-cyan: #06b6d4;
-                --text-primary: #e2e8f0;
+                --text-primary: #f1f5f9;
                 --text-secondary: #94a3b8;
                 --text-muted: #64748b;
-                --border: #2a3a4a;
+                --border: #223449;
             }
             * { margin: 0; padding: 0; box-sizing: border-box; }
             body {
@@ -401,11 +462,11 @@ def teams_dashboard():
                 border-bottom: 1px solid var(--border);
             }
             .header-left { display: flex; align-items: center; gap: 1rem; }
-            .header-logo { font-size: 2rem; }
+            .header-logo { font-size: 2.2rem; }
             .header h1 { font-size: 1.4rem; font-weight: 700; letter-spacing: -0.02em; }
             .header .sub { color: var(--text-secondary); font-size: 0.8rem; font-weight: 400; }
             .header-right { text-align: right; }
-            .header-time { color: var(--text-secondary); font-size: 0.85rem; }
+            .header-time { color: var(--text-secondary); font-size: 0.85rem; margin-top: 0.2rem; }
             .header-live {
                 display: inline-flex; align-items: center; gap: 0.4rem;
                 color: var(--accent-green); font-size: 0.75rem; font-weight: 600;
@@ -417,8 +478,8 @@ def teams_dashboard():
                 animation: pulse 2s infinite;
             }
             @keyframes pulse {
-                0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(0,200,150,0.4); }
-                50% { opacity: 0.8; box-shadow: 0 0 0 6px rgba(0,200,150,0); }
+                0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(16,185,129,0.4); }
+                50% { opacity: 0.8; box-shadow: 0 0 0 6px rgba(16,185,129,0); }
             }
 
             /* Alerta de ciclón */
@@ -447,7 +508,7 @@ def teams_dashboard():
             .no-cyclone .detail { color: var(--text-secondary); }
 
             /* Grid de cards */
-            .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; }
+            .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
             .card {
                 background: var(--bg-card); border: 1px solid var(--border);
                 border-radius: 12px; padding: 1.25rem;
@@ -457,26 +518,62 @@ def teams_dashboard():
             .card:hover { background: var(--bg-card-hover); border-color: #3a4a5a; }
             .card-header {
                 display: flex; justify-content: space-between; align-items: center;
-                margin-bottom: 1rem;
+                margin-bottom: 0.75rem;
             }
             .card-title {
-                font-size: 0.8rem; text-transform: uppercase;
+                font-size: 0.75rem; text-transform: uppercase;
                 letter-spacing: 0.06em; color: var(--text-secondary); font-weight: 600;
             }
             .card-icon { font-size: 1.3rem; }
             .card-value { font-size: 2rem; font-weight: 700; letter-spacing: -0.02em; }
-            .card-label { color: var(--text-muted); font-size: 0.8rem; margin-top: 0.25rem; }
+            .card-label { color: var(--text-muted); font-size: 0.75rem; margin-top: 0.25rem; }
             .card-value.green { color: var(--accent-green); }
             .card-value.blue { color: var(--accent-blue); }
             .card-value.amber { color: var(--accent-amber); }
             .card-value.cyan { color: var(--accent-cyan); }
 
-            /* Sección de imágenes */
-            .section-title {
-                font-size: 1rem; font-weight: 600; margin: 1.5rem 0 1rem;
-                padding-left: 0.5rem; border-left: 3px solid var(--accent-blue);
+            /* Sección Bitácora */
+            .section-header {
+                display: flex; justify-content: space-between; align-items: center;
+                margin: 2rem 0 1rem; flex-wrap: wrap; gap: 1rem;
             }
-            .image-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 1rem; }
+            .section-title {
+                font-size: 1.1rem; font-weight: 700;
+                padding-left: 0.5rem; border-left: 3px solid var(--accent-green);
+                display: flex; align-items: center; gap: 0.5rem;
+            }
+            .btn-group { display: flex; gap: 0.5rem; }
+            .btn {
+                display: inline-flex; align-items: center; gap: 0.4rem;
+                background: #1e3a5f; color: #fff; text-decoration: none;
+                padding: 0.5rem 0.9rem; border-radius: 8px; font-size: 0.8rem; font-weight: 600;
+                border: 1px solid #2b5282; transition: all 0.2s;
+            }
+            .btn:hover { background: #2563eb; border-color: #3b82f6; transform: translateY(-1px); }
+            .btn-excel { background: #065f46; border-color: #047857; color: #ecfdf5; }
+            .btn-excel:hover { background: #059669; border-color: #10b981; }
+
+            /* Tabla Bitácora */
+            .table-container {
+                background: var(--bg-card); border: 1px solid var(--border);
+                border-radius: 12px; overflow-x: auto; margin-bottom: 2rem;
+            }
+            table { width: 100%; border-collapse: collapse; font-size: 0.85rem; text-align: left; }
+            th {
+                background: #111b27; color: var(--text-secondary);
+                padding: 0.85rem 1rem; font-weight: 600; text-transform: uppercase;
+                font-size: 0.7rem; letter-spacing: 0.05em; border-bottom: 1px solid var(--border);
+            }
+            td { padding: 0.85rem 1rem; border-bottom: 1px solid rgba(255,255,255,0.03); }
+            tr:hover td { background: rgba(255,255,255,0.02); }
+            .badge {
+                display: inline-block; padding: 0.2rem 0.5rem; border-radius: 6px;
+                font-size: 0.75rem; font-weight: 600;
+            }
+            .badge-blue { background: rgba(59,130,246,0.15); color: #93c5fd; border: 1px solid rgba(59,130,246,0.3); }
+
+            /* Sección de imágenes */
+            .image-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 1rem; }
             .image-card {
                 background: var(--bg-card); border: 1px solid var(--border);
                 border-radius: 12px; overflow: hidden;
@@ -485,17 +582,13 @@ def teams_dashboard():
                 padding: 0.75rem 1rem; font-size: 0.8rem;
                 font-weight: 600; color: var(--text-secondary);
                 text-transform: uppercase; letter-spacing: 0.04em;
+                background: rgba(0,0,0,0.2);
             }
             .image-card img {
                 width: 100%; height: auto; display: block;
-                opacity: 0.9; transition: opacity 0.2s;
+                opacity: 0.95; transition: opacity 0.2s;
             }
             .image-card:hover img { opacity: 1; }
-            .placeholder-img {
-                height: 200px; display: flex; align-items: center;
-                justify-content: center; color: var(--text-muted);
-                font-size: 0.85rem;
-            }
 
             /* Footer */
             .footer {
@@ -507,8 +600,8 @@ def teams_dashboard():
             /* Auto-refresh indicator */
             .refresh-bar {
                 position: fixed; top: 0; left: 0; height: 2px;
-                background: var(--accent-blue);
-                animation: refresh-progress 120s linear infinite;
+                background: var(--accent-green);
+                animation: refresh-progress 60s linear infinite;
                 z-index: 999;
             }
             @keyframes refresh-progress { from { width: 0; } to { width: 100%; } }
@@ -545,27 +638,27 @@ def teams_dashboard():
             <div class="grid">
                 <div class="card">
                     <div class="card-header">
-                        <span class="card-title">Generación Total</span>
+                        <span class="card-title">Generación Reportada</span>
                         <span class="card-icon">⚡</span>
                     </div>
-                    <div class="card-value green">—  <span style="font-size:1rem;color:var(--text-muted)">MW</span></div>
-                    <div class="card-label">Sistema Grijalva (4 presas)</div>
+                    <div class="card-value green">""" + str(kpi_mw) + """ <span style="font-size:1rem;color:var(--text-muted)">MW</span></div>
+                    <div class="card-label">""" + kpi_central + """</div>
                 </div>
                 <div class="card">
                     <div class="card-header">
-                        <span class="card-title">Unidades en Línea</span>
+                        <span class="card-title">Unidades en Servicio</span>
                         <span class="card-icon">🔌</span>
                     </div>
-                    <div class="card-value blue">— <span style="font-size:1rem;color:var(--text-muted)">/ 20</span></div>
-                    <div class="card-label">Angostura • Chicoasén • Malpaso • Peñitas</div>
+                    <div class="card-value blue">""" + str(kpi_unidades) + """</div>
+                    <div class="card-label">Reportado en última guardia</div>
                 </div>
                 <div class="card">
                     <div class="card-header">
-                        <span class="card-title">Aportaciones</span>
+                        <span class="card-title">Aportaciones a Embalses</span>
                         <span class="card-icon">💧</span>
                     </div>
-                    <div class="card-value cyan">— <span style="font-size:1rem;color:var(--text-muted)">m³/s</span></div>
-                    <div class="card-label">Cuenca propia total</div>
+                    <div class="card-value cyan">""" + str(kpi_aportacion) + """ <span style="font-size:1rem;color:var(--text-muted)">m³/s</span></div>
+                    <div class="card-label">Gasto de entrada reportado</div>
                 </div>
                 <div class="card">
                     <div class="card-header">
@@ -574,44 +667,135 @@ def teams_dashboard():
                     </div>
                     <div class="card-value """ + ("amber" if ciclones else "green") + '">'\
                     + (str(len(ciclones)) + " activo" + ("s" if len(ciclones) > 1 else "") if ciclones else "Normal") + """</div>
-                    <div class="card-label">Pacífico + Atlántico / Golfo</div>
+                    <div class="card-label">Pacífico + Atlántico / SMN</div>
                 </div>
             </div>
 
+            <!-- Bitácora de Guardias -->
+            <div class="section-header">
+                <div class="section-title">📋 Bitácora Institucional de Guardia SPH</div>
+                <div class="btn-group">
+                    <a href="/download/excel-guardia" class="btn btn-excel" download>📥 Descargar Excel (.xlsx)</a>
+                    <a href="/download/csv-guardia" class="btn" download>📄 Descargar CSV UTF-8</a>
+                </div>
+            </div>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Fecha / Hora</th>
+                            <th>Ingeniero(a)</th>
+                            <th>Central</th>
+                            <th style="text-align:right;">Nivel (msnm)</th>
+                            <th style="text-align:right;">Aportación (m³/s)</th>
+                            <th style="text-align:right;">Extracción (m³/s)</th>
+                            <th style="text-align:right;">Turbinado (m³/s)</th>
+                            <th style="text-align:right;">Generación (MW)</th>
+                            <th>Unidades</th>
+                            <th>Observaciones / Novedades</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        """ + filas_html + """
+                    </tbody>
+                </table>
+            </div>
+
             <!-- Reportes visuales -->
-            <div class="section-title">📊 Reportes en Tiempo Real</div>
+            <div class="section-header">
+                <div class="section-title" style="border-color:var(--accent-blue);">📊 Monitoreo Visual en Tiempo Real</div>
+            </div>
             <div class="image-grid">
                 <div class="image-card">
                     <div class="label">⚡ Reporte de Unidades Generadoras</div>
-                    <div class="placeholder-img">Conectando con Azure Blob Storage...</div>
+                    <img src=\"""" + img_unidades + """\" alt="Unidades Generadoras" onerror="this.parentElement.innerHTML='<div style=\\'padding:3rem;text-align:center;color:var(--text-muted)\\'>Conectando con Azure Storage...</div>'">
                 </div>
                 <div class="image-card">
                     <div class="label">📊 Power Monitoring</div>
-                    <div class="placeholder-img">Conectando con Azure Blob Storage...</div>
+                    <img src=\"""" + img_power + """\" alt="Power Monitoring" onerror="this.parentElement.innerHTML='<div style=\\'padding:3rem;text-align:center;color:var(--text-muted)\\'>Conectando con Azure Storage...</div>'">
                 </div>
                 <div class="image-card">
                     <div class="label">🌊 Condición de Embalses</div>
-                    <div class="placeholder-img">Conectando con Azure Blob Storage...</div>
+                    <img src=\"""" + img_embalses + """\" alt="Condición de Embalses" onerror="this.parentElement.innerHTML='<div style=\\'padding:3rem;text-align:center;color:var(--text-muted)\\'>Conectando con Azure Storage...</div>'">
                 </div>
                 <div class="image-card">
                     <div class="label">🌧️ Reporte de Lluvias 24h</div>
-                    <div class="placeholder-img">Conectando con Azure Blob Storage...</div>
+                    <img src=\"""" + img_lluvias + """\" alt="Reporte de Lluvias" onerror="this.parentElement.innerHTML='<div style=\\'padding:3rem;text-align:center;color:var(--text-muted)\\'>Conectando con Azure Storage...</div>'">
                 </div>
             </div>
 
             <div class="footer">
                 Subgerencia de Producción Hidroeléctrica Grijalva • Gerencia de Ingeniería Civil • CFE Generación<br>
-                Auto-refresh cada 2 minutos
+                Auto-sincronización con Microsoft Teams • Refresh cada 60s
             </div>
         </div>
         <script>
-            // Auto-refresh cada 2 minutos
-            setTimeout(() => location.reload(), 120000);
+            // Auto-refresh cada 60 segundos
+            setTimeout(() => location.reload(), 60000);
         </script>
     </body>
     </html>
     """
     return html
+
+
+@app.route("/download/excel-guardia")
+def download_excel_guardia():
+    """Descarga la bitácora de guardias en formato Microsoft Excel (.xlsx)."""
+    excel_path = os.path.join(os.path.dirname(__file__), "bitacora_guardias.xlsx")
+    csv_path = os.path.join(os.path.dirname(__file__), "bitacora_guardias.csv")
+    json_path = os.path.join(os.path.dirname(__file__), "capturas_guardia.json")
+
+    # Si no existe el xlsx pero tenemos json o csv, generarlo dinámicamente
+    if not os.path.exists(excel_path) and os.path.exists(json_path):
+        try:
+            import openpyxl
+            with open(json_path, "r", encoding="utf-8") as f:
+                records = json.load(f)
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = "Bitácora de Guardia SPH"
+            ws.append(["Fecha / Hora CST", "Ingeniero(a)", "Central / Embalse", "Nivel (msnm)", "Aportación (m³/s)", "Extracción (m³/s)", "Gasto Turbinado (m³/s)", "Generación (MW)", "Unidades", "Observaciones"])
+            for r in records:
+                ws.append([
+                    r.get("timestamp", ""),
+                    r.get("usuario", ""),
+                    r.get("central", ""),
+                    r.get("nivel", ""),
+                    r.get("aportacion", ""),
+                    r.get("extraccion", ""),
+                    r.get("turbinado", ""),
+                    r.get("generacion", ""),
+                    r.get("unidades", ""),
+                    r.get("observaciones", "")
+                ])
+            wb.save(excel_path)
+        except Exception as e:
+            logging.error(f"Error generando Excel al vuelo: {e}")
+
+    if os.path.exists(excel_path):
+        return send_file(excel_path, as_attachment=True, download_name="Bitacora_Guardia_SPH_Grijalva.xlsx", mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    elif os.path.exists(csv_path):
+        return send_file(csv_path, as_attachment=True, download_name="Bitacora_Guardia_SPH_Grijalva.csv", mimetype="text/csv")
+    else:
+        # Generar archivo vacío si no hay registros
+        import openpyxl
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Bitácora de Guardia SPH"
+        ws.append(["Fecha / Hora CST", "Ingeniero(a)", "Central / Embalse", "Nivel (msnm)", "Aportación (m³/s)", "Extracción (m³/s)", "Gasto Turbinado (m³/s)", "Generación (MW)", "Unidades", "Observaciones"])
+        wb.save(excel_path)
+        return send_file(excel_path, as_attachment=True, download_name="Bitacora_Guardia_SPH_Grijalva.xlsx", mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+@app.route("/download/csv-guardia")
+def download_csv_guardia():
+    """Descarga la bitácora de guardias en formato CSV con BOM UTF-8 (compatible con Excel)."""
+    csv_path = os.path.join(os.path.dirname(__file__), "bitacora_guardias.csv")
+    if not os.path.exists(csv_path):
+        with open(csv_path, "w", encoding="utf-8-sig") as f:
+            f.write("timestamp,usuario,central,nivel,aportacion,extraccion,turbinado,generacion,unidades,observaciones\n")
+    return send_file(csv_path, as_attachment=True, download_name="Bitacora_Guardia_SPH_Grijalva.csv", mimetype="text/csv")
 
 
 @app.route("/api/whatsapp/webhook", methods=["POST"])

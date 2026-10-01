@@ -529,10 +529,12 @@ def _menu_action():
 
 
 CAPTURA_FILE = os.path.join(os.path.dirname(__file__), "capturas_guardia.json")
+EXCEL_FILE = os.path.join(os.path.dirname(__file__), "bitacora_guardias.xlsx")
+CSV_FILE = os.path.join(os.path.dirname(__file__), "bitacora_guardias.csv")
 
 
 def save_captura_guardia(record):
-    """Guarda un registro de captura de guardia en el archivo JSON local."""
+    """Guarda un registro de captura de guardia en JSON, CSV (Excel con UTF-8 BOM) y XLSX."""
     records = []
     if os.path.exists(CAPTURA_FILE):
         try:
@@ -545,7 +547,48 @@ def save_captura_guardia(record):
         with open(CAPTURA_FILE, "w", encoding="utf-8") as f:
             json.dump(records, f, ensure_ascii=False, indent=2)
     except Exception as e:
-        logging.error(f"Error guardando captura de guardia: {e}")
+        logging.error(f"Error guardando captura de guardia en JSON: {e}")
+
+    # Guardar en CSV con BOM UTF-8 (compatible 100% con Microsoft Excel en español)
+    import csv
+    fieldnames = ["timestamp", "usuario", "central", "nivel", "aportacion", "extraccion", "turbinado", "generacion", "unidades", "observaciones"]
+    file_exists = os.path.exists(CSV_FILE)
+    try:
+        with open(CSV_FILE, "a", newline="", encoding="utf-8-sig") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            if not file_exists:
+                writer.writeheader()
+            writer.writerow(record)
+    except Exception as e:
+        logging.error(f"Error guardando captura en CSV: {e}")
+
+    # Guardar en XLSX con openpyxl si está disponible
+    try:
+        import openpyxl
+        if os.path.exists(EXCEL_FILE):
+            wb = openpyxl.load_workbook(EXCEL_FILE)
+            ws = wb.active
+        else:
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = "Bitácora de Guardia"
+            ws.append(["Fecha / Hora CST", "Ingeniero(a)", "Central / Embalse", "Nivel (msnm)", "Aportación (m³/s)", "Extracción (m³/s)", "Gasto Turbinado (m³/s)", "Generación (MW)", "Unidades", "Observaciones"])
+        
+        ws.append([
+            record.get("timestamp", ""),
+            record.get("usuario", ""),
+            record.get("central", ""),
+            record.get("nivel", ""),
+            record.get("aportacion", ""),
+            record.get("extraccion", ""),
+            record.get("turbinado", ""),
+            record.get("generacion", ""),
+            record.get("unidades", ""),
+            record.get("observaciones", "")
+        ])
+        wb.save(EXCEL_FILE)
+    except Exception as e:
+        logging.info(f"openpyxl no disponible o error al guardar XLSX: {e}")
 
 
 def _build_captura_card(user_name="Ingeniero(a)"):
@@ -659,6 +702,18 @@ def _build_captura_card(user_name="Ingeniero(a)"):
             "id": "observaciones",
             "isMultiline": True,
             "placeholder": "Condiciones climáticas, mantenimiento o novedades..."
+        },
+        {
+            "type": "Container",
+            "style": "emphasis",
+            "items": [
+                {
+                    "type": "TextBlock",
+                    "text": "💡 **Registro Rápido por Chat:**\n\nTambién puedes registrar directamente sin llenar el formulario escribiendo:\n`@Centinela 9 Peñitas 87.45 450 600 580 320 4 Sin novedades`",
+                    "wrap": True,
+                    "size": "Small"
+                }
+            ]
         }
     ]
     actions = [
@@ -679,16 +734,16 @@ def _build_captura_card(user_name="Ingeniero(a)"):
     return _wrap_teams_card(body, actions)
 
 
-def _handle_submit_captura(action_data, user_name):
-    """Procesa y almacena los datos recibidos del formulario Action.Submit de captura."""
-    central = action_data.get("central") or "Central Hidroeléctrica"
+def _handle_submit_captura(action_data, user_name, server_base_url="https://cfe-avisos-ciclones-u6vh.onrender.com"):
+    """Procesa y almacena los datos recibidos del formulario o texto de captura."""
+    central = action_data.get("central") or "Peñitas"
     nivel = action_data.get("nivel") or "—"
     aportacion = action_data.get("aportacion") or "—"
     extraccion = action_data.get("extraccion") or "—"
     turbinado = action_data.get("turbinado") or "—"
     generacion = action_data.get("generacion") or "—"
     unidades = action_data.get("unidades") or "—"
-    observaciones = action_data.get("observaciones") or "Ninguna"
+    observaciones = action_data.get("observaciones") or "Sin novedades reportadas"
 
     from datetime import datetime, timezone, timedelta
     zona_mx = timezone(timedelta(hours=-6))
@@ -708,35 +763,40 @@ def _handle_submit_captura(action_data, user_name):
     }
     save_captura_guardia(record)
 
+    server_base_url = (server_base_url or "https://cfe-avisos-ciclones-u6vh.onrender.com").rstrip("/")
+    excel_download_url = f"{server_base_url}/download/excel-guardia"
+    dashboard_url = f"{server_base_url}/dashboard"
+
     body = [
-        _build_teams_header("🟢 REPORTE DE GUARDIA REGISTRADO"),
+        _build_teams_header("🟢 RECIBO DE CONFIRMACIÓN — GUARDIA REGISTRADA"),
         {
             "type": "TextBlock",
-            "text": f"✅ **¡Gracias {user_name}!** La toma de datos ha sido registrada exitosamente en el sistema de la SPH Grijalva.",
+            "text": f"✅ **¡Confirmado, {user_name}!** La toma de datos de **{central}** ha sido registrada exitosamente en la bitácora institucional de la SPH Grijalva y sincronizada con el Dashboard.",
             "wrap": True,
             "spacing": "Medium"
         },
         {
             "type": "FactSet",
             "facts": [
-                {"title": "📍 Central:", "value": str(central)},
+                {"title": "📍 Central / Embalse:", "value": str(central)},
                 {"title": "📏 Nivel Embalse:", "value": f"{nivel} msnm"},
                 {"title": "💧 Aportación:", "value": f"{aportacion} m³/s"},
-                {"title": "🌊 Extracción:", "value": f"{extraccion} m³/s"},
+                {"title": "🌊 Extracción Total:", "value": f"{extraccion} m³/s"},
                 {"title": "⚡ Gasto Turbinado:", "value": f"{turbinado} m³/s"},
-                {"title": "💡 Generación:", "value": f"{generacion} MW"},
-                {"title": "⚙️ Unidades:", "value": str(unidades)},
-                {"title": "👤 Capturado por:", "value": str(user_name)},
-                {"title": "⏱️ Fecha / Hora:", "value": str(fecha_hora)},
-                {"title": "📝 Novedades:", "value": str(observaciones)}
+                {"title": "💡 Generación Total:", "value": f"{generacion} MW"},
+                {"title": "⚙️ Unidades en Servicio:", "value": str(unidades)},
+                {"title": "👤 Ingeniero(a) de Guardia:", "value": str(user_name)},
+                {"title": "⏱️ Fecha / Hora Registro:", "value": str(fecha_hora)},
+                {"title": "📝 Novedades / Observaciones:", "value": str(observaciones)}
             ]
         }
     ]
     actions = [
-        _make_button("📝 Nueva Captura", "captura"),
+        {"type": "Action.OpenUrl", "title": "📥 Descargar Bitácora Excel", "url": excel_download_url},
+        {"type": "Action.OpenUrl", "title": "📊 Ver en Dashboard", "url": dashboard_url},
         _menu_action()
     ]
-    return _wrap_teams_card(body, actions)
+    return _wrap_teams_card(body, actions, summary=f"🟢 Recibo de Guardia Registrado — {central} ({fecha_hora})")
 
 
 def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-ciclones-u6vh.onrender.com"):
@@ -769,12 +829,53 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
     user_name = payload.get("from", {}).get("name", "Ingeniero(a)")
     cmd = clean_text.lower()
 
-    # 0. Formulario de captura diaria de guardia (Action.Submit o texto)
-    if cmd == "submit_captura" or (isinstance(action_data, dict) and action_data.get("command") == "submit_captura"):
-        return _handle_submit_captura(action_data, user_name)
+    # 0. Formulario o comando directo de captura de guardia
+    if "submit_captura" in cmd or (isinstance(action_data, dict) and (action_data.get("command") == "submit_captura" or action_data.get("central"))):
+        return _handle_submit_captura(action_data, user_name, server_base_url=server_base_url)
 
-    if any(k in cmd for k in ["captura", "formulario", "registrar", "toma", "datos", "guardia", "9"]) or (isinstance(action_data, dict) and action_data.get("command") == "captura"):
+    # Soporte para registro directo por texto:
+    # Ejemplos:
+    # @Centinela registrar Peñitas 87.45 450 600 580 320 4 Todo normal
+    # @Centinela 9 Peñitas 87.45 450 600 580 320 4 Sin novedades
+    is_direct_capture = False
+    tokens = clean_text.split()
+    if cmd.startswith("registrar") or cmd.startswith("guardia"):
+        if len(tokens) >= 3:
+            is_direct_capture = True
+        else:
+            return _build_captura_card(user_name)
+    elif cmd in ["9", "09", "opcion 9", "opción 9", "captura", "formulario"]:
         return _build_captura_card(user_name)
+    elif cmd.startswith("9 ") or cmd.startswith("9."):
+        nums = re.findall(r"[-+]?(?:\d*\.\d+|\d+)", clean_text)
+        if len(nums) >= 2:
+            is_direct_capture = True
+        else:
+            return _build_captura_card(user_name)
+
+    if is_direct_capture:
+        central_guess = "Peñitas"
+        for c in ["Angostura", "Chicoasén", "Chicoasen", "Malpaso", "Peñitas"]:
+            if c.lower() in clean_text.lower():
+                central_guess = "Chicoasén" if "chicoas" in c.lower() else c
+                break
+        nums = re.findall(r"[-+]?(?:\d*\.\d+|\d+)", clean_text)
+        obs = "Captura rápida vía chat Teams"
+        if "obs:" in clean_text.lower() or "novedades:" in clean_text.lower():
+            parts = re.split(r"(?:obs:|novedades:)", clean_text, flags=re.IGNORECASE)
+            if len(parts) > 1:
+                obs = parts[1].strip()
+        parsed_data = {
+            "central": central_guess,
+            "nivel": nums[0] if len(nums) > 0 else "—",
+            "aportacion": nums[1] if len(nums) > 1 else "—",
+            "extraccion": nums[2] if len(nums) > 2 else "—",
+            "turbinado": nums[3] if len(nums) > 3 else "—",
+            "generacion": nums[4] if len(nums) > 4 else "—",
+            "unidades": f"{nums[5]} unidades" if len(nums) > 5 else "En servicio",
+            "observaciones": obs
+        }
+        return _handle_submit_captura(parsed_data, user_name, server_base_url=server_base_url)
 
     # 1. Menú principal
     if not clean_text or cmd in ["menu", "menú", "hola", "help", "ayuda", "inicio", "0", "opciones", "start"]:
