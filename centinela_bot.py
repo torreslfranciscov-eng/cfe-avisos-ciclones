@@ -782,126 +782,24 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
             _build_teams_header("🤖 Centinela SPH Grijalva — Menú de Consultas"),
             {
                 "type": "TextBlock",
-                "text": f"Hola **{user_name}**, selecciona una consulta o realiza la toma de datos de tu guardia:",
+                "text": f"Hola **{user_name}**, responde mencionando a `@Centinela` seguido del número de tu consulta:",
                 "wrap": True,
                 "spacing": "Medium"
             },
             {
-                "type": "ActionSet",
-                "actions": [
-                    _make_button("📝 Captura Diaria de Guardia", "captura")
-                ]
-            },
-            {
-                "type": "TextBlock",
-                "text": "⚡ **Generación y Operación:**",
-                "weight": "Bolder",
-                "spacing": "Medium",
-                "size": "Small"
-            },
-            {
-                "type": "ColumnSet",
-                "columns": [
-                    {
-                        "type": "Column",
-                        "width": "stretch",
-                        "items": [
-                            {
-                                "type": "ActionSet",
-                                "actions": [
-                                    _make_button("⚡ Unidades", "1"),
-                                    _make_button("📈 Potencia", "3")
-                                ]
-                            }
-                        ]
-                    },
-                    {
-                        "type": "Column",
-                        "width": "stretch",
-                        "items": [
-                            {
-                                "type": "ActionSet",
-                                "actions": [
-                                    _make_button("📊 Power Monitoring", "2"),
-                                    _make_button("📋 Disponibilidad", "7")
-                                ]
-                            }
-                        ]
-                    }
-                ]
-            },
-            {
-                "type": "TextBlock",
-                "text": "🌊 **Hidrología y Meteorología:**",
-                "weight": "Bolder",
-                "spacing": "Medium",
-                "size": "Small"
-            },
-            {
-                "type": "ColumnSet",
-                "columns": [
-                    {
-                        "type": "Column",
-                        "width": "stretch",
-                        "items": [
-                            {
-                                "type": "ActionSet",
-                                "actions": [
-                                    _make_button("🌊 Embalses", "4"),
-                                    _make_button("🌧️ Lluvias 24h", "11")
-                                ]
-                            }
-                        ]
-                    },
-                    {
-                        "type": "Column",
-                        "width": "stretch",
-                        "items": [
-                            {
-                                "type": "ActionSet",
-                                "actions": [
-                                    _make_button("💧 Cuenca", "5"),
-                                    _make_button("🌧️ Lluvias Parcial", "12")
-                                ]
-                            }
-                        ]
-                    }
-                ]
-            },
-            {
-                "type": "TextBlock",
-                "text": "🌀 **Alertas y Asistente IA:**",
-                "weight": "Bolder",
-                "spacing": "Medium",
-                "size": "Small"
-            },
-            {
-                "type": "ColumnSet",
-                "columns": [
-                    {
-                        "type": "Column",
-                        "width": "stretch",
-                        "items": [
-                            {
-                                "type": "ActionSet",
-                                "actions": [
-                                    _make_button("🌀 Ciclones", "8")
-                                ]
-                            }
-                        ]
-                    },
-                    {
-                        "type": "Column",
-                        "width": "stretch",
-                        "items": [
-                            {
-                                "type": "ActionSet",
-                                "actions": [
-                                    _make_button("🤖 Pregunta IA", "6")
-                                ]
-                            }
-                        ]
-                    }
+                "type": "FactSet",
+                "facts": [
+                    {"title": "1️⃣ [ 1 ]", "value": "Reporte de Unidades Generadoras"},
+                    {"title": "2️⃣ [ 2 ]", "value": "Power Monitoring en Tiempo Real"},
+                    {"title": "3️⃣ [ 3 ]", "value": "Gráfica de Potencia Total (MW)"},
+                    {"title": "4️⃣ [ 4 ]", "value": "Estado de Presas y Embalses"},
+                    {"title": "5️⃣ [ 5 ]", "value": "Gráfica de Cuenca del Grijalva"},
+                    {"title": "6️⃣ [ 6 ]", "value": "Consultar a la Inteligencia Artificial"},
+                    {"title": "7️⃣ [ 7 ]", "value": "Disponibilidad de Generación"},
+                    {"title": "8️⃣ [ 8 ]", "value": "Avisos de Ciclones Tropicales SMN"},
+                    {"title": "9️⃣ [ 9 ]", "value": "Captura Diaria de Guardia (Embalses/MW)"},
+                    {"title": "🔟 [ 11 ]", "value": "Lluvias Acumuladas 24 Horas"},
+                    {"title": "🌧️ [ 12 ]", "value": "Lluvias Parciales del Día"}
                 ]
             },
             {
@@ -910,7 +808,7 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
                 "items": [
                     {
                         "type": "TextBlock",
-                        "text": "💡 También puedes escribir `@Centinela` seguido de tu pregunta para consultar directamente con IA.",
+                        "text": "💡 *Ejemplo:* Escribe `@Centinela 1` para Unidades, `@Centinela 4` para Embalses o `@Centinela 9` para Captura de Guardia.",
                         "wrap": True,
                         "size": "Small"
                     }
