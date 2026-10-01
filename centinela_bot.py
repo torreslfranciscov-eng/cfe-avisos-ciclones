@@ -516,7 +516,7 @@ def _make_button(title, command):
             "msteams": {
                 "type": "messageBack",
                 "text": str(command),
-                "displayText": str(command)
+                "displayText": title
             },
             "command": str(command)
         }
@@ -752,32 +752,27 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
     action_data = payload.get("value") or {}
     msteams_data = action_data.get("msteams") or {} if isinstance(action_data, dict) else {}
     
-    command_val = None
-    if isinstance(action_data, dict):
-        command_val = action_data.get("command") or msteams_data.get("text")
-    elif isinstance(action_data, str):
-        command_val = action_data
+    raw_text = (payload.get("text") or "").strip()
+    clean_text = re.sub(r"<[^>]+>", " ", raw_text)
+    clean_text = clean_text.replace("&nbsp;", " ")
+    clean_text = re.sub(r"\s+", " ", clean_text).strip()
+    clean_text = re.sub(r"^@?(centinelasph|centinela|bot)\b[\s,:]*", "", clean_text, flags=re.IGNORECASE).strip()
+    user_name = payload.get("from", {}).get("name", "Ingeniero(a)")
 
-    if command_val:
-        clean_text = str(command_val).strip()
-        user_name = payload.get("from", {}).get("name", "Ingeniero(a)")
-        cmd = clean_text.lower()
-    else:
-        raw_text = (payload.get("text") or "").strip()
-        # 1. Limpiar etiquetas HTML (<at>...</at>, <p>, &nbsp;, etc.)
-        clean_text = re.sub(r"<[^>]+>", " ", raw_text)
-        clean_text = clean_text.replace("&nbsp;", " ")
-        clean_text = re.sub(r"\s+", " ", clean_text).strip()
-        # 2. Remover el prefijo del nombre del bot si viene en el texto
-        clean_text = re.sub(r"^@?(centinelasph|centinela|bot)\b[\s,:]*", "", clean_text, flags=re.IGNORECASE).strip()
-        user_name = payload.get("from", {}).get("name", "Ingeniero(a)")
-        cmd = clean_text.lower()
+    cmd_from_value = ""
+    if isinstance(action_data, dict):
+        cmd_from_value = str(action_data.get("command") or msteams_data.get("text") or "")
+    elif isinstance(action_data, str):
+        cmd_from_value = action_data
+
+    cmd_full = f"{clean_text} {cmd_from_value} {raw_text}".lower().strip()
+    cmd = cmd_full
 
     # 0. Formulario de captura diaria de guardia (Action.Submit o texto)
-    if cmd == "submit_captura" or (isinstance(action_data, dict) and action_data.get("command") == "submit_captura"):
+    if "submit_captura" in cmd_full or (isinstance(action_data, dict) and action_data.get("command") == "submit_captura"):
         return _handle_submit_captura(action_data, user_name)
 
-    if any(k in cmd for k in ["captura", "formulario", "registrar", "toma", "datos", "guardia", "9"]) or (isinstance(action_data, dict) and action_data.get("command") == "captura"):
+    if any(k in cmd_full for k in ["captura", "formulario", "registrar", "toma", "datos", "guardia", "9"]):
         return _build_captura_card(user_name)
 
     # 1. Menú principal
