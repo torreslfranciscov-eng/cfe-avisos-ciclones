@@ -777,7 +777,7 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
     if cmd == "submit_captura" or (isinstance(action_data, dict) and action_data.get("command") == "submit_captura"):
         return _handle_submit_captura(action_data, user_name)
 
-    if cmd in ["captura", "formulario", "registrar", "toma", "datos", "9"] or (isinstance(action_data, dict) and action_data.get("command") == "captura"):
+    if any(k in cmd for k in ["captura", "formulario", "registrar", "toma", "datos", "guardia", "9"]) or (isinstance(action_data, dict) and action_data.get("command") == "captura"):
         return _build_captura_card(user_name)
 
     # 1. Menú principal
