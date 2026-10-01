@@ -339,6 +339,272 @@ def index():
     return render_template_string(html, files=files, state=state, smtp_configured=smtp_configured, telegram_configured=telegram_configured, whatsapp_configured=whatsapp_configured, teams_configured=teams_configured, os=os)
 
 
+@app.route("/dashboard")
+def teams_dashboard():
+    """Dashboard operativo dedicado para embeber como Tab fijo en Microsoft Teams."""
+    from datetime import datetime, timezone, timedelta
+    zona_mx = timezone(timedelta(hours=-6))
+    ahora = datetime.now(zona_mx).strftime("%d/%m/%Y %H:%M CST")
+
+    # Verificar ciclones activos
+    try:
+        from smn_scraper import get_active_cyclones
+        ciclones = get_active_cyclones() or []
+    except Exception:
+        ciclones = []
+
+    html = """
+    <!DOCTYPE html>
+    <html lang="es">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Centinela Dashboard — SPH Grijalva</title>
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+        <style>
+            :root {
+                --bg-primary: #0f1923;
+                --bg-card: #1a2736;
+                --bg-card-hover: #1e2f40;
+                --accent-green: #00c896;
+                --accent-blue: #3b82f6;
+                --accent-amber: #f59e0b;
+                --accent-red: #ef4444;
+                --accent-cyan: #06b6d4;
+                --text-primary: #e2e8f0;
+                --text-secondary: #94a3b8;
+                --text-muted: #64748b;
+                --border: #2a3a4a;
+            }
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body {
+                background: var(--bg-primary);
+                color: var(--text-primary);
+                font-family: 'Inter', -apple-system, 'Segoe UI', sans-serif;
+                min-height: 100vh;
+            }
+            .dashboard { max-width: 1400px; margin: 0 auto; padding: 1.5rem; }
+
+            /* Header */
+            .header {
+                display: flex; justify-content: space-between; align-items: center;
+                margin-bottom: 1.5rem; padding-bottom: 1rem;
+                border-bottom: 1px solid var(--border);
+            }
+            .header-left { display: flex; align-items: center; gap: 1rem; }
+            .header-logo { font-size: 2rem; }
+            .header h1 { font-size: 1.4rem; font-weight: 700; letter-spacing: -0.02em; }
+            .header .sub { color: var(--text-secondary); font-size: 0.8rem; font-weight: 400; }
+            .header-right { text-align: right; }
+            .header-time { color: var(--text-secondary); font-size: 0.85rem; }
+            .header-live {
+                display: inline-flex; align-items: center; gap: 0.4rem;
+                color: var(--accent-green); font-size: 0.75rem; font-weight: 600;
+                text-transform: uppercase; letter-spacing: 0.05em;
+            }
+            .pulse {
+                width: 8px; height: 8px; border-radius: 50%;
+                background: var(--accent-green);
+                animation: pulse 2s infinite;
+            }
+            @keyframes pulse {
+                0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(0,200,150,0.4); }
+                50% { opacity: 0.8; box-shadow: 0 0 0 6px rgba(0,200,150,0); }
+            }
+
+            /* Alerta de ciclón */
+            .cyclone-alert {
+                background: linear-gradient(135deg, #7f1d1d, #991b1b);
+                border: 1px solid var(--accent-red);
+                border-radius: 12px; padding: 1rem 1.5rem;
+                margin-bottom: 1.5rem;
+                display: flex; align-items: center; gap: 1rem;
+                animation: alert-glow 3s ease-in-out infinite;
+            }
+            @keyframes alert-glow {
+                0%, 100% { box-shadow: 0 0 15px rgba(239,68,68,0.2); }
+                50% { box-shadow: 0 0 25px rgba(239,68,68,0.4); }
+            }
+            .cyclone-alert .icon { font-size: 2rem; }
+            .cyclone-alert .text { font-weight: 600; }
+            .cyclone-alert .detail { color: #fca5a5; font-size: 0.85rem; }
+            .no-cyclone {
+                background: var(--bg-card); border: 1px solid var(--border);
+                border-radius: 12px; padding: 1rem 1.5rem;
+                margin-bottom: 1.5rem;
+                display: flex; align-items: center; gap: 1rem;
+                color: var(--accent-green);
+            }
+            .no-cyclone .detail { color: var(--text-secondary); }
+
+            /* Grid de cards */
+            .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; }
+            .card {
+                background: var(--bg-card); border: 1px solid var(--border);
+                border-radius: 12px; padding: 1.25rem;
+                transition: all 0.2s ease;
+                cursor: default;
+            }
+            .card:hover { background: var(--bg-card-hover); border-color: #3a4a5a; }
+            .card-header {
+                display: flex; justify-content: space-between; align-items: center;
+                margin-bottom: 1rem;
+            }
+            .card-title {
+                font-size: 0.8rem; text-transform: uppercase;
+                letter-spacing: 0.06em; color: var(--text-secondary); font-weight: 600;
+            }
+            .card-icon { font-size: 1.3rem; }
+            .card-value { font-size: 2rem; font-weight: 700; letter-spacing: -0.02em; }
+            .card-label { color: var(--text-muted); font-size: 0.8rem; margin-top: 0.25rem; }
+            .card-value.green { color: var(--accent-green); }
+            .card-value.blue { color: var(--accent-blue); }
+            .card-value.amber { color: var(--accent-amber); }
+            .card-value.cyan { color: var(--accent-cyan); }
+
+            /* Sección de imágenes */
+            .section-title {
+                font-size: 1rem; font-weight: 600; margin: 1.5rem 0 1rem;
+                padding-left: 0.5rem; border-left: 3px solid var(--accent-blue);
+            }
+            .image-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 1rem; }
+            .image-card {
+                background: var(--bg-card); border: 1px solid var(--border);
+                border-radius: 12px; overflow: hidden;
+            }
+            .image-card .label {
+                padding: 0.75rem 1rem; font-size: 0.8rem;
+                font-weight: 600; color: var(--text-secondary);
+                text-transform: uppercase; letter-spacing: 0.04em;
+            }
+            .image-card img {
+                width: 100%; height: auto; display: block;
+                opacity: 0.9; transition: opacity 0.2s;
+            }
+            .image-card:hover img { opacity: 1; }
+            .placeholder-img {
+                height: 200px; display: flex; align-items: center;
+                justify-content: center; color: var(--text-muted);
+                font-size: 0.85rem;
+            }
+
+            /* Footer */
+            .footer {
+                text-align: center; padding: 1.5rem 0 0.5rem;
+                color: var(--text-muted); font-size: 0.75rem;
+                border-top: 1px solid var(--border); margin-top: 2rem;
+            }
+
+            /* Auto-refresh indicator */
+            .refresh-bar {
+                position: fixed; top: 0; left: 0; height: 2px;
+                background: var(--accent-blue);
+                animation: refresh-progress 120s linear infinite;
+                z-index: 999;
+            }
+            @keyframes refresh-progress { from { width: 0; } to { width: 100%; } }
+        </style>
+    </head>
+    <body>
+        <div class="refresh-bar"></div>
+        <div class="dashboard">
+            <!-- Header -->
+            <div class="header">
+                <div class="header-left">
+                    <div class="header-logo">⚡</div>
+                    <div>
+                        <h1>Centinela SPH Grijalva</h1>
+                        <span class="sub">Subgerencia de Producción Hidroeléctrica • CFE Generación</span>
+                    </div>
+                </div>
+                <div class="header-right">
+                    <div class="header-live"><div class="pulse"></div> EN VIVO</div>
+                    <div class="header-time">""" + ahora + """</div>
+                </div>
+            </div>
+
+            <!-- Alerta de ciclón -->
+            """ + (
+                ''.join([
+                    f'<div class="cyclone-alert"><div class="icon">🌀</div><div><div class="text">⚠️ {c.get("nombre", "Ciclón Tropical")} — {c.get("cuenca", "")}</div><div class="detail">Sistema activo en vigilancia • Monitoreo continuo</div></div></div>'
+                    for c in ciclones
+                ]) if ciclones else
+                '<div class="no-cyclone"><div class="icon">☀️</div><div><div class="text" style="font-weight:600">Sin ciclones tropicales activos</div><div class="detail">Pacífico y Atlántico en condiciones normales</div></div></div>'
+            ) + """
+
+            <!-- KPIs principales -->
+            <div class="grid">
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-title">Generación Total</span>
+                        <span class="card-icon">⚡</span>
+                    </div>
+                    <div class="card-value green">—  <span style="font-size:1rem;color:var(--text-muted)">MW</span></div>
+                    <div class="card-label">Sistema Grijalva (4 presas)</div>
+                </div>
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-title">Unidades en Línea</span>
+                        <span class="card-icon">🔌</span>
+                    </div>
+                    <div class="card-value blue">— <span style="font-size:1rem;color:var(--text-muted)">/ 20</span></div>
+                    <div class="card-label">Angostura • Chicoasén • Malpaso • Peñitas</div>
+                </div>
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-title">Aportaciones</span>
+                        <span class="card-icon">💧</span>
+                    </div>
+                    <div class="card-value cyan">— <span style="font-size:1rem;color:var(--text-muted)">m³/s</span></div>
+                    <div class="card-label">Cuenca propia total</div>
+                </div>
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-title">Vigilancia Ciclónica</span>
+                        <span class="card-icon">🌀</span>
+                    </div>
+                    <div class="card-value """ + ("amber" if ciclones else "green") + '">'\
+                    + (str(len(ciclones)) + " activo" + ("s" if len(ciclones) > 1 else "") if ciclones else "Normal") + """</div>
+                    <div class="card-label">Pacífico + Atlántico / Golfo</div>
+                </div>
+            </div>
+
+            <!-- Reportes visuales -->
+            <div class="section-title">📊 Reportes en Tiempo Real</div>
+            <div class="image-grid">
+                <div class="image-card">
+                    <div class="label">⚡ Reporte de Unidades Generadoras</div>
+                    <div class="placeholder-img">Conectando con Azure Blob Storage...</div>
+                </div>
+                <div class="image-card">
+                    <div class="label">📊 Power Monitoring</div>
+                    <div class="placeholder-img">Conectando con Azure Blob Storage...</div>
+                </div>
+                <div class="image-card">
+                    <div class="label">🌊 Condición de Embalses</div>
+                    <div class="placeholder-img">Conectando con Azure Blob Storage...</div>
+                </div>
+                <div class="image-card">
+                    <div class="label">🌧️ Reporte de Lluvias 24h</div>
+                    <div class="placeholder-img">Conectando con Azure Blob Storage...</div>
+                </div>
+            </div>
+
+            <div class="footer">
+                Subgerencia de Producción Hidroeléctrica Grijalva • Gerencia de Ingeniería Civil • CFE Generación<br>
+                Auto-refresh cada 2 minutos
+            </div>
+        </div>
+        <script>
+            // Auto-refresh cada 2 minutos
+            setTimeout(() => location.reload(), 120000);
+        </script>
+    </body>
+    </html>
+    """
+    return html
+
+
 @app.route("/api/whatsapp/webhook", methods=["POST"])
 def whatsapp_incoming_webhook():
     """Recibe mensajes entrantes de WhatsApp y los procesa con Centinela Bot."""
