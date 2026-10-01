@@ -11,6 +11,11 @@ import json
 import logging
 import threading
 import requests as http_requests
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 from flask import Flask, jsonify, request, send_from_directory, render_template_string, Response
 from smn_scraper import get_active_cyclones, fetch_cyclone_data
 from report_generator import generate_word_report
@@ -472,7 +477,14 @@ def teams_centinela_webhook():
 
     payload = request.get_json(silent=True) or {}
     server_base_url = os.getenv("SERVER_PUBLIC_URL", request.host_url).rstrip("/")
-    response_card = handle_incoming_teams_message(payload, server_base_url=server_base_url)
+    try:
+        response_card = handle_incoming_teams_message(payload, server_base_url=server_base_url)
+    except Exception as e:
+        logging.error(f"[TEAMS] Excepción al procesar comando: {e}", exc_info=True)
+        response_card = {
+            "type": "message",
+            "text": "⚠️ Centinela encontró un error al procesar tu solicitud. Intenta de nuevo o escribe 'menu'."
+        }
     return jsonify(response_card), 200
 
 

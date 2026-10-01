@@ -256,10 +256,10 @@ def send_cyclone_teams(cyclone_data, docx_path=None):
     payload = {
         "type": "message",
         "summary": f"Aviso de Ciclón Tropical CFE: {sistema} ({cuenca})",
+        "text": f"🌀 Aviso de Ciclón Tropical: {sistema} ({cuenca}) — CFE Hidrometeorología",
         "attachments": [
             {
                 "contentType": "application/vnd.microsoft.card.adaptive",
-                "contentUrl": None,
                 "content": adaptive_card
             }
         ]

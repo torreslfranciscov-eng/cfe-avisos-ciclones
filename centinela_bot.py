@@ -450,7 +450,7 @@ def handle_incoming_whatsapp_message(payload):
 # MÓDULO CENTINELA PARA MICROSOFT TEAMS
 # ==========================================
 
-def _wrap_teams_card(card_body, actions=None):
+def _wrap_teams_card(card_body, actions=None, summary="Centinela SPH Grijalva"):
     """Envuelve el cuerpo en una Adaptive Card v1.3 lista para Microsoft Teams."""
     card = {
         "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
@@ -463,10 +463,10 @@ def _wrap_teams_card(card_body, actions=None):
 
     return {
         "type": "message",
+        "text": summary,
         "attachments": [
             {
                 "contentType": "application/vnd.microsoft.card.adaptive",
-                "contentUrl": None,
                 "content": card
             }
         ]
