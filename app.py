@@ -29,6 +29,17 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 
 app = Flask(__name__)
 
+
+@app.after_request
+def add_teams_embed_headers(response):
+    """Permite que Teams embeba el dashboard como Tab (iframe) dentro de un canal."""
+    response.headers['Content-Security-Policy'] = (
+        "frame-ancestors 'self' https://teams.microsoft.com https://*.teams.microsoft.com "
+        "https://*.skype.com https://*.microsoft.com"
+    )
+    response.headers.pop('X-Frame-Options', None)
+    return response
+
 REPORTS_DIR = os.getenv("REPORTS_DIR", "reportes_generados")
 STATE_FILE = os.getenv("STATE_FILE", "state_processed.json")
 POLL_INTERVAL_MINUTES = int(os.getenv("POLL_INTERVAL_MINUTES", "15"))

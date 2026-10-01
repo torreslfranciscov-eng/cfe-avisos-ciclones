@@ -506,24 +506,38 @@ def _build_teams_footer():
     }
 
 
+def _menu_action():
+    """Botón reutilizable para volver al menú principal desde cualquier tarjeta."""
+    return {"type": "Action.Submit", "title": "📋 Volver al Menú", "data": {"command": "menu"}}
+
+
 def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-ciclones-u6vh.onrender.com"):
     """
     Controlador para procesar mensajes y comandos dirigidos a Centinela desde Microsoft Teams
     (Outgoing Webhooks y Flujos de Power Automate / Workflows).
+    Soporta texto directo (@Centinela 2) y botones interactivos (Action.Submit).
     """
     import re
     server_base_url = (server_base_url or "https://cfe-avisos-ciclones-u6vh.onrender.com").rstrip("/")
-    raw_text = (payload.get("text") or "").strip()
+
+    # Soporte para Action.Submit (botones interactivos de Adaptive Cards)
+    action_data = payload.get("value") or {}
+    if isinstance(action_data, dict) and action_data.get("command"):
+        clean_text = str(action_data["command"]).strip()
+        user_name = payload.get("from", {}).get("name", "Ingeniero(a)")
+        cmd = clean_text.lower()
+    else:
+        raw_text = (payload.get("text") or "").strip()
     
-    # 1. Limpiar etiquetas HTML (<at>...</at>, <p>, &nbsp;, etc.)
-    clean_text = re.sub(r"<[^>]+>", " ", raw_text)
-    clean_text = clean_text.replace("&nbsp;", " ")
-    clean_text = re.sub(r"\s+", " ", clean_text).strip()
+        # 1. Limpiar etiquetas HTML (<at>...</at>, <p>, &nbsp;, etc.)
+        clean_text = re.sub(r"<[^>]+>", " ", raw_text)
+        clean_text = clean_text.replace("&nbsp;", " ")
+        clean_text = re.sub(r"\s+", " ", clean_text).strip()
     
-    # 2. Remover el prefijo del nombre del bot si viene en el texto (ej. "centinelaSph 1", "Centinela 1", "bot embalses")
-    clean_text = re.sub(r"^@?(centinelasph|centinela|bot)\b[\s,:]*", "", clean_text, flags=re.IGNORECASE).strip()
-    user_name = payload.get("from", {}).get("name", "Ingeniero(a)")
-    cmd = clean_text.lower()
+        # 2. Remover el prefijo del nombre del bot si viene en el texto (ej. "centinelaSph 1", "Centinela 1", "bot embalses")
+        clean_text = re.sub(r"^@?(centinelasph|centinela|bot)\b[\s,:]*", "", clean_text, flags=re.IGNORECASE).strip()
+        user_name = payload.get("from", {}).get("name", "Ingeniero(a)")
+        cmd = clean_text.lower()
 
     # 1. Menú principal
     if not clean_text or cmd in ["menu", "menú", "hola", "help", "ayuda", "inicio", "0", "opciones", "start"]:
@@ -531,23 +545,120 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
             _build_teams_header("🤖 Centinela SPH Grijalva — Menú de Consultas"),
             {
                 "type": "TextBlock",
-                "text": f"Hola **{user_name}**, estoy a tu disposición con la información técnica del Sistema Hidroeléctrico del Río Grijalva:",
+                "text": f"Hola **{user_name}**, selecciona una consulta o escribe tu pregunta:",
                 "wrap": True,
                 "spacing": "Medium"
             },
             {
-                "type": "FactSet",
-                "facts": [
-                    {"title": "1️⃣ o 'unidades':", "value": "Reporte de Unidades Generadoras"},
-                    {"title": "2️⃣ o 'power':", "value": "Power Monitoring en tiempo real"},
-                    {"title": "3️⃣ o 'potencia':", "value": "Gráfica de Potencia Actual"},
-                    {"title": "4️⃣ o 'embalses':", "value": "Condición de los Embalses (Niveles/Cotas)"},
-                    {"title": "5️⃣ o 'cuenca':", "value": "Aportaciones por Cuenca Propia"},
-                    {"title": "7️⃣ o 'disponibilidad':", "value": "Reporte de Disponibilidad Hidroeléctrica"},
-                    {"title": "8️⃣ o 'ciclon':", "value": "Avisos de Ciclón Tropical y Trayectoria"},
-                    {"title": "11 o 'lluvias 24h':", "value": "Reporte de Lluvias 24h (6am a 6am)"},
-                    {"title": "12 o 'lluvias parcial':", "value": "Reporte de Lluvias acumulado parcial"},
-                    {"title": "🤖 Consulta Técnica IA:", "value": "Escribe directamente tu pregunta con @Centinela"}
+                "type": "TextBlock",
+                "text": "⚡ **Generación y Operación:**",
+                "weight": "Bolder",
+                "spacing": "Medium",
+                "size": "Small"
+            },
+            {
+                "type": "ColumnSet",
+                "columns": [
+                    {
+                        "type": "Column",
+                        "width": "stretch",
+                        "items": [
+                            {
+                                "type": "ActionSet",
+                                "actions": [
+                                    {"type": "Action.Submit", "title": "⚡ Unidades", "data": {"command": "1"}},
+                                    {"type": "Action.Submit", "title": "📈 Potencia", "data": {"command": "3"}}
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "type": "Column",
+                        "width": "stretch",
+                        "items": [
+                            {
+                                "type": "ActionSet",
+                                "actions": [
+                                    {"type": "Action.Submit", "title": "📊 Power Monitoring", "data": {"command": "2"}},
+                                    {"type": "Action.Submit", "title": "📋 Disponibilidad", "data": {"command": "7"}}
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                "type": "TextBlock",
+                "text": "🌊 **Hidrología y Meteorología:**",
+                "weight": "Bolder",
+                "spacing": "Medium",
+                "size": "Small"
+            },
+            {
+                "type": "ColumnSet",
+                "columns": [
+                    {
+                        "type": "Column",
+                        "width": "stretch",
+                        "items": [
+                            {
+                                "type": "ActionSet",
+                                "actions": [
+                                    {"type": "Action.Submit", "title": "🌊 Embalses", "data": {"command": "4"}},
+                                    {"type": "Action.Submit", "title": "🌧️ Lluvias 24h", "data": {"command": "11"}}
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "type": "Column",
+                        "width": "stretch",
+                        "items": [
+                            {
+                                "type": "ActionSet",
+                                "actions": [
+                                    {"type": "Action.Submit", "title": "💧 Cuenca", "data": {"command": "5"}},
+                                    {"type": "Action.Submit", "title": "🌧️ Lluvias Parcial", "data": {"command": "12"}}
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                "type": "TextBlock",
+                "text": "🌀 **Alertas y Asistente IA:**",
+                "weight": "Bolder",
+                "spacing": "Medium",
+                "size": "Small"
+            },
+            {
+                "type": "ColumnSet",
+                "columns": [
+                    {
+                        "type": "Column",
+                        "width": "stretch",
+                        "items": [
+                            {
+                                "type": "ActionSet",
+                                "actions": [
+                                    {"type": "Action.Submit", "title": "🌀 Ciclones", "data": {"command": "8"}}
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "type": "Column",
+                        "width": "stretch",
+                        "items": [
+                            {
+                                "type": "ActionSet",
+                                "actions": [
+                                    {"type": "Action.Submit", "title": "🤖 Pregunta IA", "data": {"command": "6"}}
+                                ]
+                            }
+                        ]
+                    }
                 ]
             },
             {
@@ -556,7 +667,7 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
                 "items": [
                     {
                         "type": "TextBlock",
-                        "text": "💡 **Tip de uso:** Escribe `@Centinela 8` para monitoreo de ciclones o `@Centinela 4` para ver embalses.",
+                        "text": "💡 También puedes escribir `@Centinela` seguido de tu pregunta para consultar directamente con IA.",
                         "wrap": True,
                         "size": "Small"
                     }
@@ -564,7 +675,7 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
             },
             _build_teams_footer()
         ]
-        return _wrap_teams_card(body)
+        return _wrap_teams_card(body, summary=f"Menú Centinela SPH Grijalva — {user_name}")
 
     # 2. Reporte de Unidades (Opción 1)
     if cmd in ["1", "01"] or any(k in cmd for k in ["unidad", "unidades", "reporte de unidades", "opcion 1", "opción 1"]) or re.match(r"^1(\D|$)", cmd):
@@ -581,7 +692,7 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
             },
             _build_teams_footer()
         ]
-        actions = [{"type": "Action.OpenUrl", "title": "🔍 Ver Imagen Completa", "url": img_url}]
+        actions = [{"type": "Action.OpenUrl", "title": "🔍 Ver Imagen Completa", "url": img_url}, _menu_action()]
         return _wrap_teams_card(body, actions)
 
     # 3. Power Monitoring (Opción 2)
@@ -599,7 +710,7 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
             },
             _build_teams_footer()
         ]
-        actions = [{"type": "Action.OpenUrl", "title": "🔍 Ver Imagen Completa", "url": img_url}]
+        actions = [{"type": "Action.OpenUrl", "title": "🔍 Ver Imagen Completa", "url": img_url}, _menu_action()]
         return _wrap_teams_card(body, actions)
 
     # 4. Gráfica de Potencia (Opción 3)
@@ -617,7 +728,7 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
             },
             _build_teams_footer()
         ]
-        actions = [{"type": "Action.OpenUrl", "title": "🔍 Ver Imagen Completa", "url": img_url}]
+        actions = [{"type": "Action.OpenUrl", "title": "🔍 Ver Imagen Completa", "url": img_url}, _menu_action()]
         return _wrap_teams_card(body, actions)
 
     # 5. Condición de Embalses (Opción 4)
@@ -635,7 +746,7 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
             },
             _build_teams_footer()
         ]
-        actions = [{"type": "Action.OpenUrl", "title": "🔍 Ver Imagen Completa", "url": img_url}]
+        actions = [{"type": "Action.OpenUrl", "title": "🔍 Ver Imagen Completa", "url": img_url}, _menu_action()]
         return _wrap_teams_card(body, actions)
 
     # 6. Aportaciones por Cuenca (Opción 5)
@@ -653,7 +764,7 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
             },
             _build_teams_footer()
         ]
-        actions = [{"type": "Action.OpenUrl", "title": "🔍 Ver Imagen Completa", "url": img_url}]
+        actions = [{"type": "Action.OpenUrl", "title": "🔍 Ver Imagen Completa", "url": img_url}, _menu_action()]
         return _wrap_teams_card(body, actions)
 
     # 7. Reporte de Ciclones Tropicales (Opción 8)
@@ -690,7 +801,7 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
                 },
                 _build_teams_footer()
             ]
-            actions = [{"type": "Action.OpenUrl", "title": "🌐 Ver Portal CONAGUA SMN", "url": "https://smn.conagua.gob.mx"}]
+            actions = [{"type": "Action.OpenUrl", "title": "🌐 Ver Portal CONAGUA SMN", "url": "https://smn.conagua.gob.mx"}, _menu_action()]
             return _wrap_teams_card(body, actions)
 
         # Si hay ciclón activo
@@ -759,7 +870,8 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
         body.append(_build_teams_footer())
         actions = [
             {"type": "Action.OpenUrl", "title": "🌐 Fuente Oficial SMN", "url": basin_url},
-            {"type": "Action.OpenUrl", "title": "📑 Portal Avisos CFE", "url": server_base_url}
+            {"type": "Action.OpenUrl", "title": "📑 Portal Avisos CFE", "url": server_base_url},
+            _menu_action()
         ]
         return _wrap_teams_card(body, actions)
 
@@ -778,7 +890,7 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
             },
             _build_teams_footer()
         ]
-        actions = [{"type": "Action.OpenUrl", "title": "🔍 Ver Imagen Completa", "url": img_url}]
+        actions = [{"type": "Action.OpenUrl", "title": "🔍 Ver Imagen Completa", "url": img_url}, _menu_action()]
         return _wrap_teams_card(body, actions)
 
     # 9. Reporte de Lluvias Parcial (Opción 12)
@@ -796,7 +908,7 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
             },
             _build_teams_footer()
         ]
-        actions = [{"type": "Action.OpenUrl", "title": "🔍 Ver Imagen Completa", "url": img_url}]
+        actions = [{"type": "Action.OpenUrl", "title": "🔍 Ver Imagen Completa", "url": img_url}, _menu_action()]
         return _wrap_teams_card(body, actions)
 
     # 10. Reporte de Disponibilidad (Opción 7)
@@ -812,7 +924,7 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
             },
             _build_teams_footer()
         ]
-        return _wrap_teams_card(body)
+        return _wrap_teams_card(body, [_menu_action()])
 
     # 10. Consulta con Inteligencia Artificial (Opción 6 o preguntas abiertas)
     question = clean_text
@@ -843,5 +955,5 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
         },
         _build_teams_footer()
     ]
-    return _wrap_teams_card(body)
+    return _wrap_teams_card(body, [_menu_action()])
 
