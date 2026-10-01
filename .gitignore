@@ -13,3 +13,11 @@ whatsapp_server/node_modules/
 whatsapp_server/auth_info_baileys/
 whatsapp_server/_IGNORE_*
 .DS_Store
+.env*
+state_processed.json
+
+# managed by open-wa
+**.data.json
+**.node-persist**
+**_IGNORE_**
+# end managed by open-wa

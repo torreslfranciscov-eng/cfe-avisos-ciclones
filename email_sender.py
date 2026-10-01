@@ -259,7 +259,7 @@ def send_whatsapp_disconnected_alert():
             <p>Los reportes por <strong>Correo</strong> y <strong>Telegram</strong> continúan funcionando con normalidad, pero para restablecer los envíos al grupo de WhatsApp se requiere volver a escanear el código QR:</p>
             
             <div style="text-align: center;">
-                <a href="https://cfe-avisos-ciclones.onrender.com/qr" class="btn" target="_blank">📱 Escanear Código QR Ahora</a>
+                <a href="https://cfe-avisos-ciclones-u6vh.onrender.com/qr" class="btn" target="_blank">📱 Escanear Código QR Ahora</a>
             </div>
 
             <p style="font-size: 12px; color: #666;">

@@ -10,6 +10,11 @@ import os
 import json
 import logging
 import requests
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 
 def safe_html_truncate(text, max_len=1024):
@@ -286,7 +291,7 @@ def answer_telegram_callback_query(callback_query_id, text=None, show_alert=Fals
         return False
 
 
-def handle_incoming_telegram_update(payload, server_base_url="https://cfe-avisos-ciclones.onrender.com"):
+def handle_incoming_telegram_update(payload, server_base_url="https://cfe-avisos-ciclones-u6vh.onrender.com"):
     """
     Procesa mensajes entrantes del bot de Telegram para Centinela SPH Grijalva (@wgrijalva_bot).
     Mantiene aislamiento absoluto: si recibe botones o comandos de Bitso, los redirige a @mibitso_bot.

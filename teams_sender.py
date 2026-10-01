@@ -34,7 +34,7 @@ def send_cyclone_teams(cyclone_data, docx_path=None):
     img_tray_url = cyclone_data.get("img_tray_url")
     basin_url = cyclone_data.get("basin_url", "https://smn.conagua.gob.mx")
     
-    server_base_url = os.getenv("SERVER_PUBLIC_URL", "https://cfe-avisos-ciclones.onrender.com").rstrip("/")
+    server_base_url = os.getenv("SERVER_PUBLIC_URL", "https://cfe-avisos-ciclones-u6vh.onrender.com").rstrip("/")
     filename = os.path.basename(docx_path) if docx_path else ""
     download_url = f"{server_base_url}/download/{filename}" if filename else server_base_url
 

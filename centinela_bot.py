@@ -31,12 +31,12 @@ usuarios_en_modo_ia = {}
 _blob_cache = {}
 
 
-def get_cyclones_summary(server_base_url="https://cfe-avisos-ciclones.onrender.com"):
+def get_cyclones_summary(server_base_url="https://cfe-avisos-ciclones-u6vh.onrender.com"):
     """
     Obtiene la información y resumen de ciclones activos desde CONAGUA/SMN
     para responder en Centinela (WhatsApp, Teams, Telegram).
     """
-    server_base_url = (server_base_url or "https://cfe-avisos-ciclones.onrender.com").rstrip("/")
+    server_base_url = (server_base_url or "https://cfe-avisos-ciclones-u6vh.onrender.com").rstrip("/")
     try:
         active_list = get_active_cyclones()
     except Exception as e:
@@ -506,13 +506,13 @@ def _build_teams_footer():
     }
 
 
-def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-ciclones.onrender.com"):
+def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-ciclones-u6vh.onrender.com"):
     """
     Controlador para procesar mensajes y comandos dirigidos a Centinela desde Microsoft Teams
     (Outgoing Webhooks y Flujos de Power Automate / Workflows).
     """
     import re
-    server_base_url = (server_base_url or "https://cfe-avisos-ciclones.onrender.com").rstrip("/")
+    server_base_url = (server_base_url or "https://cfe-avisos-ciclones-u6vh.onrender.com").rstrip("/")
     raw_text = (payload.get("text") or "").strip()
     
     # 1. Limpiar etiquetas HTML (<at>...</at>, <p>, &nbsp;, etc.)
