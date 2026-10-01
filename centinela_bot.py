@@ -507,9 +507,25 @@ def _build_teams_footer():
     }
 
 
+def _make_button(title, command):
+    """Crea un botón Action.Submit compatible con Teams Outgoing Webhook, Workflows y Bot Framework (msteams.messageBack)."""
+    return {
+        "type": "Action.Submit",
+        "title": title,
+        "data": {
+            "msteams": {
+                "type": "messageBack",
+                "text": str(command),
+                "displayText": title
+            },
+            "command": str(command)
+        }
+    }
+
+
 def _menu_action():
     """Botón reutilizable para volver al menú principal desde cualquier tarjeta."""
-    return {"type": "Action.Submit", "title": "📋 Volver al Menú", "data": {"command": "menu"}}
+    return _make_button("📋 Volver al Menú", "menu")
 
 
 CAPTURA_FILE = os.path.join(os.path.dirname(__file__), "capturas_guardia.json")
@@ -649,7 +665,14 @@ def _build_captura_card(user_name="Ingeniero(a)"):
         {
             "type": "Action.Submit",
             "title": "📤 Registrar Reporte de Guardia",
-            "data": {"command": "submit_captura"}
+            "data": {
+                "msteams": {
+                    "type": "messageBack",
+                    "text": "submit_captura",
+                    "displayText": "Registrar Reporte de Guardia"
+                },
+                "command": "submit_captura"
+            }
         },
         _menu_action()
     ]
@@ -710,11 +733,7 @@ def _handle_submit_captura(action_data, user_name):
         }
     ]
     actions = [
-        {
-            "type": "Action.Submit",
-            "title": "📝 Nueva Captura",
-            "data": {"command": "captura"}
-        },
+        _make_button("📝 Nueva Captura", "captura"),
         _menu_action()
     ]
     return _wrap_teams_card(body, actions)
@@ -729,21 +748,27 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
     import re
     server_base_url = (server_base_url or "https://cfe-avisos-ciclones-u6vh.onrender.com").rstrip("/")
 
-    # Soporte para Action.Submit (botones interactivos de Adaptive Cards)
+    # Soporte para Action.Submit y msteams.messageBack (botones interactivos de Adaptive Cards)
     action_data = payload.get("value") or {}
-    if isinstance(action_data, dict) and action_data.get("command"):
-        clean_text = str(action_data["command"]).strip()
+    msteams_data = action_data.get("msteams") or {} if isinstance(action_data, dict) else {}
+    
+    command_val = None
+    if isinstance(action_data, dict):
+        command_val = action_data.get("command") or msteams_data.get("text")
+    elif isinstance(action_data, str):
+        command_val = action_data
+
+    if command_val:
+        clean_text = str(command_val).strip()
         user_name = payload.get("from", {}).get("name", "Ingeniero(a)")
         cmd = clean_text.lower()
     else:
         raw_text = (payload.get("text") or "").strip()
-    
         # 1. Limpiar etiquetas HTML (<at>...</at>, <p>, &nbsp;, etc.)
         clean_text = re.sub(r"<[^>]+>", " ", raw_text)
         clean_text = clean_text.replace("&nbsp;", " ")
         clean_text = re.sub(r"\s+", " ", clean_text).strip()
-    
-        # 2. Remover el prefijo del nombre del bot si viene en el texto (ej. "centinelaSph 1", "Centinela 1", "bot embalses")
+        # 2. Remover el prefijo del nombre del bot si viene en el texto
         clean_text = re.sub(r"^@?(centinelasph|centinela|bot)\b[\s,:]*", "", clean_text, flags=re.IGNORECASE).strip()
         user_name = payload.get("from", {}).get("name", "Ingeniero(a)")
         cmd = clean_text.lower()
@@ -768,7 +793,7 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
             {
                 "type": "ActionSet",
                 "actions": [
-                    {"type": "Action.Submit", "title": "📝 Captura Diaria de Guardia", "data": {"command": "captura"}}
+                    _make_button("📝 Captura Diaria de Guardia", "captura")
                 ]
             },
             {
@@ -788,8 +813,8 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
                             {
                                 "type": "ActionSet",
                                 "actions": [
-                                    {"type": "Action.Submit", "title": "⚡ Unidades", "data": {"command": "1"}},
-                                    {"type": "Action.Submit", "title": "📈 Potencia", "data": {"command": "3"}}
+                                    _make_button("⚡ Unidades", "1"),
+                                    _make_button("📈 Potencia", "3")
                                 ]
                             }
                         ]
@@ -801,8 +826,8 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
                             {
                                 "type": "ActionSet",
                                 "actions": [
-                                    {"type": "Action.Submit", "title": "📊 Power Monitoring", "data": {"command": "2"}},
-                                    {"type": "Action.Submit", "title": "📋 Disponibilidad", "data": {"command": "7"}}
+                                    _make_button("📊 Power Monitoring", "2"),
+                                    _make_button("📋 Disponibilidad", "7")
                                 ]
                             }
                         ]
@@ -826,8 +851,8 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
                             {
                                 "type": "ActionSet",
                                 "actions": [
-                                    {"type": "Action.Submit", "title": "🌊 Embalses", "data": {"command": "4"}},
-                                    {"type": "Action.Submit", "title": "🌧️ Lluvias 24h", "data": {"command": "11"}}
+                                    _make_button("🌊 Embalses", "4"),
+                                    _make_button("🌧️ Lluvias 24h", "11")
                                 ]
                             }
                         ]
@@ -839,8 +864,8 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
                             {
                                 "type": "ActionSet",
                                 "actions": [
-                                    {"type": "Action.Submit", "title": "💧 Cuenca", "data": {"command": "5"}},
-                                    {"type": "Action.Submit", "title": "🌧️ Lluvias Parcial", "data": {"command": "12"}}
+                                    _make_button("💧 Cuenca", "5"),
+                                    _make_button("🌧️ Lluvias Parcial", "12")
                                 ]
                             }
                         ]
@@ -864,7 +889,7 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
                             {
                                 "type": "ActionSet",
                                 "actions": [
-                                    {"type": "Action.Submit", "title": "🌀 Ciclones", "data": {"command": "8"}}
+                                    _make_button("🌀 Ciclones", "8")
                                 ]
                             }
                         ]
@@ -876,7 +901,7 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
                             {
                                 "type": "ActionSet",
                                 "actions": [
-                                    {"type": "Action.Submit", "title": "🤖 Pregunta IA", "data": {"command": "6"}}
+                                    _make_button("🤖 Pregunta IA", "6")
                                 ]
                             }
                         ]
