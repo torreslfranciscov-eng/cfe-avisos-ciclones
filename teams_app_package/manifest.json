@@ -1,0 +1,44 @@
+{
+  "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.16/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.16",
+  "version": "1.0.0",
+  "id": "c8f29d10-4e5a-4b98-bdf2-998877665544",
+  "packageName": "com.cfe.sphgrijalva.centinela",
+  "developer": {
+    "name": "CFE - Subgerencia de Produccion Hidroelectrica Grijalva",
+    "websiteUrl": "https://cfe-avisos-ciclones-u6vh.onrender.com",
+    "privacyUrl": "https://cfe-avisos-ciclones-u6vh.onrender.com/dashboard",
+    "termsOfUseUrl": "https://cfe-avisos-ciclones-u6vh.onrender.com/dashboard"
+  },
+  "icons": {
+    "outline": "outline.png",
+    "color": "color.png"
+  },
+  "name": {
+    "short": "Centinela SPH",
+    "full": "Centinela Dashboard SPH Grijalva"
+  },
+  "description": {
+    "short": "Dashboard operativo de avisos de ciclones y embalses SPH Grijalva",
+    "full": "Dashboard operativo en tiempo real para seguimiento de ciclones, embalses y generacion de la Subgerencia de Produccion Hidroelectrica Grijalva."
+  },
+  "accentColor": "#00C896",
+  "staticTabs": [
+    {
+      "entityId": "centinelaDashboardTab",
+      "name": "\ud83d\udcca Dashboard Centinela",
+      "contentUrl": "https://cfe-avisos-ciclones-u6vh.onrender.com/dashboard",
+      "websiteUrl": "https://cfe-avisos-ciclones-u6vh.onrender.com/dashboard",
+      "scopes": [
+        "team",
+        "personal"
+      ]
+    }
+  ],
+  "permissions": [
+    "identity"
+  ],
+  "validDomains": [
+    "cfe-avisos-ciclones-u6vh.onrender.com"
+  ]
+}

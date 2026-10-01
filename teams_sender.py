@@ -276,3 +276,24 @@ def send_cyclone_teams(cyclone_data, docx_path=None):
     except Exception as e:
         logging.error(f"[TEAMS] Excepción al enviar a Microsoft Teams: {e}")
         return False
+
+
+def send_captura_form_teams():
+    """Envía la tarjeta con el formulario de Captura Diaria de Guardia al canal de Teams."""
+    webhook_url = os.getenv("TEAMS_WEBHOOK_URL", DEFAULT_TEAMS_WEBHOOK).strip()
+    if not webhook_url:
+        logging.info("[TEAMS] Webhook no configurado para envío de formulario.")
+        return False
+    from centinela_bot import _build_captura_card
+    card = _build_captura_card("Ingeniero(a) de Guardia")
+    try:
+        r = requests.post(webhook_url, json=card, timeout=10)
+        if r.status_code in [200, 201, 202]:
+            logging.info("[TEAMS] Formulario de captura enviado exitosamente al canal.")
+            return True
+        else:
+            logging.error(f"[TEAMS] Error HTTP {r.status_code} enviando formulario: {r.text}")
+            return False
+    except Exception as e:
+        logging.error(f"[TEAMS] Excepción enviando formulario de captura a Teams: {e}")
+        return False

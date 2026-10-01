@@ -5,6 +5,7 @@ en WhatsApp sustituyendo UltraMsg con nuestro propio servidor WhatsApp Baileys.
 """
 
 import os
+import json
 import time
 import hmac
 import base64
@@ -511,6 +512,214 @@ def _menu_action():
     return {"type": "Action.Submit", "title": "📋 Volver al Menú", "data": {"command": "menu"}}
 
 
+CAPTURA_FILE = os.path.join(os.path.dirname(__file__), "capturas_guardia.json")
+
+
+def save_captura_guardia(record):
+    """Guarda un registro de captura de guardia en el archivo JSON local."""
+    records = []
+    if os.path.exists(CAPTURA_FILE):
+        try:
+            with open(CAPTURA_FILE, "r", encoding="utf-8") as f:
+                records = json.load(f)
+        except Exception:
+            records = []
+    records.append(record)
+    try:
+        with open(CAPTURA_FILE, "w", encoding="utf-8") as f:
+            json.dump(records, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logging.error(f"Error guardando captura de guardia: {e}")
+
+
+def _build_captura_card(user_name="Ingeniero(a)"):
+    """Construye una tarjeta interactiva con formulario para captura diaria de datos de guardia."""
+    body = [
+        _build_teams_header("📝 Captura Diaria de Guardia — Embalses y Generación"),
+        {
+            "type": "TextBlock",
+            "text": f"Hola **{user_name}**, por favor completa las mediciones de tu turno de guardia:",
+            "wrap": True,
+            "spacing": "Small"
+        },
+        {
+            "type": "TextBlock",
+            "text": "📍 **Central / Embalse:**",
+            "weight": "Bolder",
+            "spacing": "Medium"
+        },
+        {
+            "type": "Input.ChoiceSet",
+            "id": "central",
+            "style": "compact",
+            "value": "Peñitas",
+            "choices": [
+                {"title": "Peñitas (C.H. Ángel Albino Corzo)", "value": "Peñitas"},
+                {"title": "Malpaso (C.H. Nezahualcóyotl)", "value": "Malpaso"},
+                {"title": "Chicoasén (C.H. Manuel Moreno Torres)", "value": "Chicoasén"},
+                {"title": "La Angostura (C.H. Belisario Domínguez)", "value": "La Angostura"}
+            ]
+        },
+        {
+            "type": "TextBlock",
+            "text": "📏 **Nivel de Embalse (cota msnm):**",
+            "weight": "Bolder",
+            "spacing": "Small"
+        },
+        {
+            "type": "Input.Text",
+            "id": "nivel",
+            "placeholder": "ej. 87.45",
+            "style": "text"
+        },
+        {
+            "type": "TextBlock",
+            "text": "💧 **Aportación a Embalse (m³/s):**",
+            "weight": "Bolder",
+            "spacing": "Small"
+        },
+        {
+            "type": "Input.Text",
+            "id": "aportacion",
+            "placeholder": "ej. 450.0",
+            "style": "text"
+        },
+        {
+            "type": "TextBlock",
+            "text": "🌊 **Extracción Total (m³/s):**",
+            "weight": "Bolder",
+            "spacing": "Small"
+        },
+        {
+            "type": "Input.Text",
+            "id": "extraccion",
+            "placeholder": "ej. 600.0",
+            "style": "text"
+        },
+        {
+            "type": "TextBlock",
+            "text": "⚡ **Gasto Turbinado (m³/s):**",
+            "weight": "Bolder",
+            "spacing": "Small"
+        },
+        {
+            "type": "Input.Text",
+            "id": "turbinado",
+            "placeholder": "ej. 580.0",
+            "style": "text"
+        },
+        {
+            "type": "TextBlock",
+            "text": "💡 **Generación Total (MW):**",
+            "weight": "Bolder",
+            "spacing": "Small"
+        },
+        {
+            "type": "Input.Text",
+            "id": "generacion",
+            "placeholder": "ej. 320.0",
+            "style": "text"
+        },
+        {
+            "type": "TextBlock",
+            "text": "⚙️ **Unidades Generando:**",
+            "weight": "Bolder",
+            "spacing": "Small"
+        },
+        {
+            "type": "Input.Text",
+            "id": "unidades",
+            "placeholder": "ej. 4 de 5 unidades",
+            "style": "text"
+        },
+        {
+            "type": "TextBlock",
+            "text": "📝 **Observaciones / Novedades:**",
+            "weight": "Bolder",
+            "spacing": "Small"
+        },
+        {
+            "type": "Input.Text",
+            "id": "observaciones",
+            "isMultiline": True,
+            "placeholder": "Condiciones climáticas, mantenimiento o novedades..."
+        }
+    ]
+    actions = [
+        {
+            "type": "Action.Submit",
+            "title": "📤 Registrar Reporte de Guardia",
+            "data": {"command": "submit_captura"}
+        },
+        _menu_action()
+    ]
+    return _wrap_teams_card(body, actions)
+
+
+def _handle_submit_captura(action_data, user_name):
+    """Procesa y almacena los datos recibidos del formulario Action.Submit de captura."""
+    central = action_data.get("central") or "Central Hidroeléctrica"
+    nivel = action_data.get("nivel") or "—"
+    aportacion = action_data.get("aportacion") or "—"
+    extraccion = action_data.get("extraccion") or "—"
+    turbinado = action_data.get("turbinado") or "—"
+    generacion = action_data.get("generacion") or "—"
+    unidades = action_data.get("unidades") or "—"
+    observaciones = action_data.get("observaciones") or "Ninguna"
+
+    from datetime import datetime, timezone, timedelta
+    zona_mx = timezone(timedelta(hours=-6))
+    fecha_hora = datetime.now(zona_mx).strftime("%d/%m/%Y %H:%M CST")
+
+    record = {
+        "timestamp": fecha_hora,
+        "usuario": user_name,
+        "central": central,
+        "nivel": nivel,
+        "aportacion": aportacion,
+        "extraccion": extraccion,
+        "turbinado": turbinado,
+        "generacion": generacion,
+        "unidades": unidades,
+        "observaciones": observaciones
+    }
+    save_captura_guardia(record)
+
+    body = [
+        _build_teams_header("🟢 REPORTE DE GUARDIA REGISTRADO"),
+        {
+            "type": "TextBlock",
+            "text": f"✅ **¡Gracias {user_name}!** La toma de datos ha sido registrada exitosamente en el sistema de la SPH Grijalva.",
+            "wrap": True,
+            "spacing": "Medium"
+        },
+        {
+            "type": "FactSet",
+            "facts": [
+                {"title": "📍 Central:", "value": str(central)},
+                {"title": "📏 Nivel Embalse:", "value": f"{nivel} msnm"},
+                {"title": "💧 Aportación:", "value": f"{aportacion} m³/s"},
+                {"title": "🌊 Extracción:", "value": f"{extraccion} m³/s"},
+                {"title": "⚡ Gasto Turbinado:", "value": f"{turbinado} m³/s"},
+                {"title": "💡 Generación:", "value": f"{generacion} MW"},
+                {"title": "⚙️ Unidades:", "value": str(unidades)},
+                {"title": "👤 Capturado por:", "value": str(user_name)},
+                {"title": "⏱️ Fecha / Hora:", "value": str(fecha_hora)},
+                {"title": "📝 Novedades:", "value": str(observaciones)}
+            ]
+        }
+    ]
+    actions = [
+        {
+            "type": "Action.Submit",
+            "title": "📝 Nueva Captura",
+            "data": {"command": "captura"}
+        },
+        _menu_action()
+    ]
+    return _wrap_teams_card(body, actions)
+
+
 def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-ciclones-u6vh.onrender.com"):
     """
     Controlador para procesar mensajes y comandos dirigidos a Centinela desde Microsoft Teams
@@ -539,15 +748,28 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
         user_name = payload.get("from", {}).get("name", "Ingeniero(a)")
         cmd = clean_text.lower()
 
+    # 0. Formulario de captura diaria de guardia (Action.Submit o texto)
+    if cmd == "submit_captura" or (isinstance(action_data, dict) and action_data.get("command") == "submit_captura"):
+        return _handle_submit_captura(action_data, user_name)
+
+    if cmd in ["captura", "formulario", "registrar", "toma", "datos", "9"] or (isinstance(action_data, dict) and action_data.get("command") == "captura"):
+        return _build_captura_card(user_name)
+
     # 1. Menú principal
     if not clean_text or cmd in ["menu", "menú", "hola", "help", "ayuda", "inicio", "0", "opciones", "start"]:
         body = [
             _build_teams_header("🤖 Centinela SPH Grijalva — Menú de Consultas"),
             {
                 "type": "TextBlock",
-                "text": f"Hola **{user_name}**, selecciona una consulta o escribe tu pregunta:",
+                "text": f"Hola **{user_name}**, selecciona una consulta o realiza la toma de datos de tu guardia:",
                 "wrap": True,
                 "spacing": "Medium"
+            },
+            {
+                "type": "ActionSet",
+                "actions": [
+                    {"type": "Action.Submit", "title": "📝 Captura Diaria de Guardia", "data": {"command": "captura"}}
+                ]
             },
             {
                 "type": "TextBlock",

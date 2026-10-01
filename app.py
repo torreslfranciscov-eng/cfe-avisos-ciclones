@@ -774,6 +774,17 @@ def teams_centinela_webhook():
     return jsonify(response_card), 200
 
 
+@app.route("/api/teams/trigger-captura", methods=["GET", "POST"])
+def trigger_teams_captura():
+    """Lanza la publicación del formulario de captura de guardia directamente en el canal de Teams."""
+    from teams_sender import send_captura_form_teams
+    success = send_captura_form_teams()
+    return jsonify({
+        "success": success,
+        "message": "Formulario de Captura Diaria enviado al canal de Teams" if success else "Error al enviar al canal de Teams (verifica TEAMS_WEBHOOK_URL)"
+    })
+
+
 @app.route("/api/telegram/webhook", methods=["POST"])
 @app.route("/api/telegram/centinela", methods=["POST"])
 def telegram_centinela_webhook():
