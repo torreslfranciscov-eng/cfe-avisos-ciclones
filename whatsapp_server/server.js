@@ -14,6 +14,7 @@ const {
     fetchLatestBaileysVersion,
     Browsers
 } = require('@whiskeysockets/baileys');
+const { generateEmbalsesReport } = require('./embalses_reporter');
 
 const app = express();
 app.use(cors());
@@ -37,6 +38,7 @@ const AZURE_CONTAINER = process.env.AZURE_STORAGE_CONTAINER || 'unidades';
 const botSentMessageIds = new Set();
 const usuariosEnModoIA = new Set();
 const mensajesProcesados = new Map();
+const recentSentTexts = new Set();
 
 function downloadAzureBlob(container, blob) {
     return new Promise((resolve) => {
@@ -99,6 +101,7 @@ function getMenuText() {
         "8️⃣ 🌀 Avisos de Ciclón Tropical (SMN / CONAGUA)\n" +
         "11️⃣ Reporte de lluvias 24h (6am a 6am)\n" +
         "12️⃣ Reporte de lluvias parcial\n" +
+        "13️⃣ 🌊 Reporte Operativo de Embalses (Cotas, Δ y NAMO)\n" +
         "6️⃣ 🤖 Consultar con IA\n\n" +
         "💡 *Tip:* En modo IA, escribe 'volver' para regresar aquí."
     );
@@ -257,6 +260,11 @@ app.post('/sendText', async (req, res) => {
         if (!jid.includes('@')) {
             jid = `${jid}@s.whatsapp.net`;
         }
+        if (text && typeof text === 'string') {
+            const prefix = text.slice(0, 40);
+            recentSentTexts.add(prefix);
+            setTimeout(() => recentSentTexts.delete(prefix), 60000);
+        }
         const result = await waSock.sendMessage(jid, { text: text || '' });
         if (result?.key?.id) {
             botSentMessageIds.add(result.key.id);
@@ -265,6 +273,62 @@ app.post('/sendText', async (req, res) => {
     } catch (err) {
         console.error('Error enviando texto:', err);
         res.status(500).json({ ok: false, error: err.toString() });
+    }
+});
+
+// Endpoint nativo para generar y despachar Reporte de Embalses CFE
+app.post('/api/embalses/despachar', async (req, res) => {
+    if (!waSock || clientStatus !== 'READY') {
+        return res.status(503).json({ ok: false, error: 'WhatsApp client not ready' });
+    }
+    const { to, region, deltaHours } = req.body;
+    if (!to) {
+        return res.status(400).json({ ok: false, error: 'Falta destinatario "to"' });
+    }
+    try {
+        let jid = to;
+        if (!jid.includes('@')) {
+            jid = `${jid}@s.whatsapp.net`;
+        }
+        const report = await generateEmbalsesReport(region || 'SURESTE', deltaHours || 3);
+        const text = report.mensajeTexto;
+
+        if (text && typeof text === 'string') {
+            const prefix = text.slice(0, 40);
+            recentSentTexts.add(prefix);
+            setTimeout(() => recentSentTexts.delete(prefix), 60000);
+        }
+
+        const result = await waSock.sendMessage(jid, { text });
+        if (result?.key?.id) {
+            botSentMessageIds.add(result.key.id);
+        }
+        res.json({ ok: true, to: jid, result, reportText: text });
+    } catch (err) {
+        console.error('Error generando/despachando reporte de embalses:', err);
+        res.status(500).json({ ok: false, error: err.toString() });
+    }
+});
+
+// Endpoint para consultar reporte de embalses en JSON/Texto
+app.get('/api/embalses/reporte', async (req, res) => {
+    try {
+        const region = req.query.region || 'SURESTE';
+        const delta = parseInt(req.query.deltaHours || '3', 10);
+        const report = await generateEmbalsesReport(region, delta);
+        res.json({ ok: true, report });
+    } catch (err) {
+        res.status(500).json({ ok: false, error: err.toString() });
+    }
+});
+
+// Endpoint para disparar de inmediato el reporte programado al grupo
+app.post('/api/embalses/despachar-ahora', async (req, res) => {
+    try {
+        await despacharReporteAutomaticoEmbalses();
+        res.json({ ok: true, message: 'Reporte de embalses despachado al grupo Avisos Ciclones' });
+    } catch (e) {
+        res.status(500).json({ ok: false, error: e.message });
     }
 });
 
@@ -508,6 +572,17 @@ async function procesarMensajeCentinela(fromJid, text, msgId) {
         const buf = await downloadAzureBlob(AZURE_CONTAINER, 'reporte_lluvia_1_2_638848218556433423.png');
         if (buf) await sendImg(buf, '📊 *CFE SPH Grijalva - Reporte de lluvias parcial de 6am a hora actual.*', 'lluvias_parcial.png');
         else await sendMsg('⚠️ No se pudo obtener el reporte de lluvias parcial.');
+    } else if (body === '13' || cleanCmd.includes('cotas') || cleanCmd.includes('namo') || cleanCmd.includes('reporte embalse') || cleanCmd.includes('hidrocloud')) {
+        try {
+            const rep = await generateEmbalsesReport('SURESTE', 3);
+            if (rep && rep.mensajeTexto) {
+                await sendMsg(rep.mensajeTexto);
+                return;
+            }
+        } catch (e) {
+            console.error('[CENTINELA] Error generando reporte de embalses opción 13:', e.message);
+            await sendMsg('⚠️ No fue posible consultar el reporte de embalses en este momento.');
+        }
     } else if (body === '7') {
         const buf = await downloadAzureBlob('reporte-unidades', 'telegram_report.txt');
         if (buf) await sendMsg(`📊 *Reporte de Disponibilidad*\n\n${buf.toString('utf8')}`);
@@ -557,7 +632,20 @@ async function procesarMensajeCentinela(fromJid, text, msgId) {
             "💡 _Escribe 'volver' para regresar al menú principal._"
         );
     } else {
-        await sendMsg(getMenuText());
+        // 1. Ignorar respuestas pasivas o confirmaciones (evita disparar el menú por cortesía)
+        const isPassiveReply = ['ok', 'recibido', 'enterado', 'gracias', 'muchas gracias', 'de acuerdo', '👍', '👌', 'entendido', 'saludos', 'listo', 'bueno'].includes(cleanCmd);
+        if (isPassiveReply) {
+            return;
+        }
+
+        // 2. Solo enviar el menú si es una petición explícita de menú o saludo formal exacto en chat privado
+        const isExplicitMenuCommand = ['menu', 'menú', 'ayuda', 'help', 'inicio', 'centinela', 'hola', '0'].includes(cleanCmd) 
+                                   || cleanCmd.startsWith('#') 
+                                   || cleanCmd.startsWith('!');
+
+        if (isExplicitMenuCommand && !fromJid.endsWith('@g.us')) {
+            await sendMsg(getMenuText());
+        }
     }
 }
 
@@ -573,6 +661,43 @@ app.get('/status', (req, res) => {
         port: PORT
     });
 });
+
+// ==========================================
+// DESPACHO AUTOMÁTICO DE EMBALSES (CADA 3 HORAS)
+// ==========================================
+const GRUPO_AVISOS_CICLONES_JID = process.env.EMBALSES_GRUPO_JID || '120363412138898868@g.us';
+const INTERVALO_EMBALSES_MS = 3 * 60 * 60 * 1000; // 3 horas
+let temporizadorEmbalses = null;
+
+async function despacharReporteAutomaticoEmbalses() {
+    if (!waSock || clientStatus !== 'READY') {
+        console.log('[CRON-EMBALSES] WhatsApp no está listo, se omitirá este ciclo.');
+        return;
+    }
+    try {
+        console.log(`[CRON-EMBALSES] Generando reporte automático para grupo Avisos Ciclones (${GRUPO_AVISOS_CICLONES_JID})...`);
+        const rep = await generateEmbalsesReport('SURESTE', 3);
+        if (rep && rep.mensajeTexto) {
+            const prefix = rep.mensajeTexto.slice(0, 40);
+            recentSentTexts.add(prefix);
+            setTimeout(() => recentSentTexts.delete(prefix), 60000);
+
+            const result = await waSock.sendMessage(GRUPO_AVISOS_CICLONES_JID, { text: rep.mensajeTexto });
+            if (result?.key?.id) {
+                botSentMessageIds.add(result.key.id);
+            }
+            console.log(`✅ [CRON-EMBALSES] Reporte de embalses enviado con éxito al grupo Avisos Ciclones a las ${new Date().toLocaleTimeString('es-MX')}`);
+        }
+    } catch (err) {
+        console.error('❌ [CRON-EMBALSES] Error enviando reporte automático:', err.message);
+    }
+}
+
+function iniciarCronEmbalses() {
+    if (temporizadorEmbalses) clearInterval(temporizadorEmbalses);
+    temporizadorEmbalses = setInterval(despacharReporteAutomaticoEmbalses, INTERVALO_EMBALSES_MS);
+    console.log(`⏰ [CRON-EMBALSES] Programador activo: Reportes automáticos cada 3 horas a ${GRUPO_AVISOS_CICLONES_JID}`);
+}
 
 let isStarting = false;
 
@@ -620,18 +745,56 @@ async function startBaileys() {
         waSock.ev.on('creds.update', saveCreds);
 
         waSock.ev.on('messages.upsert', async (m) => {
+            if (m.type !== 'notify') return; // Ignorar sincronización de historial antiguo
+
+            const nowSec = Math.floor(Date.now() / 1000);
+
             for (const msg of m.messages) {
+                // 1. Ignorar mensajes enviados por nosotros mismos
+                if (msg.key.fromMe) continue;
+
+                // 2. Ignorar si es un mensaje del propio bot
                 if (msg.key.id && botSentMessageIds.has(msg.key.id)) {
                     botSentMessageIds.delete(msg.key.id);
                     continue;
                 }
+
+                // 3. Ignorar mensajes viejos (más de 60 segundos) durante sincronizaciones
+                const msgTs = msg.messageTimestamp ? Number(msg.messageTimestamp) : 0;
+                if (msgTs > 0 && (nowSec - msgTs) > 60) {
+                    continue;
+                }
+
                 const from = msg.key.remoteJid;
+                // 4. Ignorar estados de WhatsApp
+                if (from === 'status@broadcast') continue;
+
+                // 5. En grupos (@g.us), NUNCA responder en automático a menos que sea un comando explícito (#, !, centinela)
+                const isGroup = from && from.endsWith('@g.us');
+
                 const text = msg.message?.conversation || 
                              msg.message?.extendedTextMessage?.text || 
                              msg.message?.imageMessage?.caption || 
                              '';
                 if (!text || !text.trim()) continue;
-                procesarMensajeCentinela(from, text.trim(), msg.key.id);
+
+                const trimmed = text.trim();
+                console.log('[WA MSG RECV]', { from, text: trimmed.slice(0, 60), fromMe: msg.key.fromMe, id: msg.key.id });
+
+                // 4.1. Filtro estricto anti-eco de HydroCloud y reportes salientes
+                if (trimmed.includes('REPORTE DE EMBALSES') || 
+                    trimmed.includes('HydroCloud') || 
+                    trimmed.includes('CENTRALES HIDROELÉCTRICAS') ||
+                    trimmed.includes('NAMO') ||
+                    recentSentTexts.has(trimmed.slice(0, 40))) {
+                    continue;
+                }
+
+                if (isGroup && !trimmed.startsWith('#') && !trimmed.startsWith('!') && !trimmed.toLowerCase().startsWith('centinela')) {
+                    continue;
+                }
+
+                procesarMensajeCentinela(from, trimmed, msg.key.id);
             }
         });
 
@@ -650,6 +813,10 @@ async function startBaileys() {
                 lastErrorMsg = `Close status: ${statusCode}`;
                 console.log(`Conexión cerrada (status: ${statusCode}). Reconectando...`);
                 clientStatus = 'DISCONNECTED';
+                if (temporizadorEmbalses) {
+                    clearInterval(temporizadorEmbalses);
+                    temporizadorEmbalses = null;
+                }
                 if (isLoggedOut || statusCode === DisconnectReason.loggedOut || statusCode === 401) {
                     console.log('Sesión cerrada formalmente (loggedOut). Limpiando credenciales antiguas para generar nuevo QR...');
                     try {
@@ -665,6 +832,7 @@ async function startBaileys() {
                 latestQrDataUrl = null;
                 lastErrorMsg = null;
                 isStarting = false;
+                iniciarCronEmbalses();
             }
         });
     } catch (err) {

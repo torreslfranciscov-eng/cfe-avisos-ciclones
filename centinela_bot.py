@@ -251,6 +251,7 @@ def get_menu_text():
         "8️⃣ 🌀 Avisos de Ciclón Tropical (SMN / CONAGUA)\n"
         "11️⃣ Reporte de lluvias 24h (6am a 6am)\n"
         "12️⃣ Reporte de lluvias parcial\n"
+        "13️⃣ 🌊 Reporte Operativo de Embalses (Cotas, Δ y NAMO)\n"
         "6️⃣ 🤖 Consultar con IA\n\n"
         "💡 *Tip:* En modo IA, escribe 'volver' para regresar aquí."
     )
@@ -428,6 +429,18 @@ def handle_incoming_whatsapp_message(payload):
         else:
             send_wa_text(from_jid, "⚠️ No se pudo obtener el reporte de disponibilidad.")
 
+    elif text == "13" or any(k in text.lower() for k in ["cotas", "namo", "reporte embalse", "hidrocloud"]):
+        try:
+            r = requests.get("http://127.0.0.1:8086/api/embalses/reporte?region=SURESTE&deltaHours=3", timeout=10)
+            if r.status_code == 200 and r.json().get("ok"):
+                rep_text = r.json()["report"]["mensajeTexto"]
+                send_wa_text(from_jid, rep_text)
+            else:
+                send_wa_text(from_jid, "⚠️ No se pudo obtener el reporte de embalses en este momento.")
+        except Exception as e:
+            logging.error(f"[CENTINELA] Error obteniendo reporte de embalses opción 13: {e}")
+            send_wa_text(from_jid, "⚠️ No fue posible conectar con el servicio de embalses.")
+
     elif text == "6":
         usuarios_en_modo_ia[from_jid] = True
         msg_ia = (
@@ -443,8 +456,16 @@ def handle_incoming_whatsapp_message(payload):
         send_wa_text(from_jid, msg_ia)
 
     else:
-        # Responder con el menú principal
-        send_wa_text(from_jid, get_menu_text())
+        # Ignorar confirmaciones o ecos para no enviar el menú innecesariamente
+        clean_low = text.lower().strip()
+        if clean_low in ["ok", "recibido", "enterado", "gracias", "muchas gracias", "de acuerdo", "👍", "👌", "entendido", "saludos", "listo"]:
+            return
+        if "reporte de embalses" in clean_low or "hydrocloud" in clean_low or "namo" in clean_low:
+            return
+
+        # Responder con el menú principal solo si es un comando explícito o saludo
+        if clean_low in ["menu", "menú", "ayuda", "help", "inicio", "centinela", "hola", "0"] or clean_low.startswith(("#", "!")):
+            send_wa_text(from_jid, get_menu_text())
 
 
 # ==========================================
