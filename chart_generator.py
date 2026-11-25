@@ -175,8 +175,20 @@ def render_embalses_dashboard(crp: str | None = None, delta_hours: int = 3) -> b
         for bar, x_item in zip(bars, sorted_vol):
             w = bar.get_width()
             u_mm3 = x_item["almacenamiento_util_mm3"]
+            d_namino = x_item.get("delta_namino_m")
+            lvl_v = x_item.get("nivel_actual")
+            is_below_namino = (
+                (d_namino is not None and float(d_namino) < 0)
+                or (w <= 0.0 and u_mm3 <= 0.0 and lvl_v is not None)
+            )
+            if is_below_namino and lvl_v is not None:
+                lbl = f"0.0%  (Bajo NAMINO · {float(lvl_v):.2f} msnm)"
+                txt_color = SEM_YELLOW
+            else:
+                lbl = f"{w:.1f}%  ({u_mm3:,.1f} Mm³)"
+                txt_color = TEXT_DARK
             ax_bar.text(w + 1.2, bar.get_y() + bar.get_height() / 2,
-                        f"{w:.1f}%  ({u_mm3:,.1f} Mm³)", va="center", fontsize=8.3, fontweight="bold", color=TEXT_DARK)
+                        lbl, va="center", fontsize=8.3, fontweight="bold", color=txt_color)
     else:
         ax_bar.text(0.5, 0.5, "Sin embalses con cota msnm en este filtro", ha="center", va="center", color=TEXT_MUTED)
         ax_bar.axis("off")
@@ -193,6 +205,7 @@ def render_embalses_dashboard(crp: str | None = None, delta_hours: int = 3) -> b
         row_bg = "#FFFFFF" if idx % 2 == 0 else "#F1F5F9"
         d_m = it.get("delta_m")
         d_str = f"{d_m:+.2f} m" if d_m is not None else "—"
+        is_below_namino = False
         if it.get("nivel_en_escala_local"):
             lvl_str = f"{it['nivel_actual']:.2f} m*"
             namo_str = "Escala local"
@@ -206,7 +219,12 @@ def render_embalses_dashboard(crp: str | None = None, delta_hours: int = 3) -> b
             dn = it.get("delta_namo_m")
             namo_str = f"{dn:+.2f} m" if dn is not None else "—"
             util_str = f"{it['almacenamiento_util_mm3']:,.1f}" if it.get("almacenamiento_util_mm3") is not None else "—"
-            pct_str = f"{it['pct_llenado_util']:.1f}%" if it.get("pct_llenado_util") is not None else "—"
+            d_namino = it.get("delta_namino_m")
+            is_below_namino = d_namino is not None and float(d_namino) < 0
+            if is_below_namino:
+                pct_str = "0.0% (<NAMINO)"
+            else:
+                pct_str = f"{it['pct_llenado_util']:.1f}%" if it.get("pct_llenado_util") is not None else "—"
             lib_str = f"{it['volumen_disponible_namo_mm3']:,.1f}" if it.get("volumen_disponible_namo_mm3") is not None else "—"
 
         clave = it.get("clave_cenace")
@@ -220,7 +238,7 @@ def render_embalses_dashboard(crp: str | None = None, delta_hours: int = 3) -> b
         sem_bg = row_bg
         if it.get("semaforo") == "ROJO":
             sem_bg = "#FEE2E2"
-        elif it.get("semaforo") == "AMARILLO":
+        elif it.get("semaforo") == "AMARILLO" or is_below_namino:
             sem_bg = "#FEF3C7"
         cell_colors.append([row_bg, row_bg, sem_bg, row_bg, sem_bg, row_bg, sem_bg, row_bg])
 
