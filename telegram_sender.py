@@ -483,6 +483,7 @@ def handle_incoming_telegram_update(payload, server_base_url="https://cfe-avisos
 
     # 11. Embalses en vivo (Opción 13)
     elif cmd == "13" or cmd.startswith("13 ") or cmd.startswith("/embalses") or any(k in cmd for k in ["cotas", "namo", "reporte embalse"]):
+        send_telegram_text(chat_id, "⏳ <i>Consultando niveles y volúmenes de embalses en tiempo real...</i>")
         try:
             txt = get_cfe_embalses_text(crp=detect_crp_from_text(cmd), delta_hours=3)
             send_telegram_text(chat_id, f"<pre>{txt[:3900]}</pre>")
@@ -492,6 +493,7 @@ def handle_incoming_telegram_update(payload, server_base_url="https://cfe-avisos
 
     # 12. Alertas Hidráulicas e Hidrométricas (Opción 14)
     elif cmd == "14" or cmd.startswith("14 ") or cmd.startswith("/alertas") or any(k in cmd for k in ["alertas", "avenidas"]):
+        send_telegram_text(chat_id, "⏳ <i>Evaluando alertas hidráulicas e hidrométricas activas...</i>")
         try:
             txt = get_cfe_alerts_text(crp=detect_crp_from_text(cmd))
             send_telegram_text(chat_id, f"<pre>{txt[:3900]}</pre>")
@@ -501,6 +503,7 @@ def handle_incoming_telegram_update(payload, server_base_url="https://cfe-avisos
 
     # 13. Boletín Diario Integral (Opción 15)
     elif cmd == "15" or cmd.startswith("15 ") or cmd.startswith("/boletin") or any(k in cmd for k in ["boletin", "boletín"]):
+        send_telegram_text(chat_id, "⏳ <i>Generando Boletín Hidrológico Diario Integral...</i>")
         try:
             txt = get_cfe_daily_bulletin_text(crp=detect_crp_from_text(cmd), cutoff_hour=6)
             send_telegram_text(chat_id, f"<pre>{txt[:3900]}</pre>")
@@ -510,6 +513,7 @@ def handle_incoming_telegram_update(payload, server_base_url="https://cfe-avisos
 
     # 14. Corte de Lluvia por Cuenca (Opción 16)
     elif cmd == "16" or cmd.startswith("16 ") or cmd.startswith("/lluviacuencas") or any(k in cmd for k in ["lluvia cuenca", "lluvias cuenca", "corte lluvia"]):
+        send_telegram_text(chat_id, "⏳ <i>Calculando corte de lluvia 24h por cuenca (GOES)...</i>")
         try:
             txt = get_cfe_rainfall_by_basin_text(cutoff_hour=6)
             send_telegram_text(chat_id, f"<pre>{txt[:3900]}</pre>")
@@ -519,6 +523,7 @@ def handle_incoming_telegram_update(payload, server_base_url="https://cfe-avisos
 
     # 15. Salud de Red Hidrométrica (Opción 17)
     elif cmd == "17" or cmd.startswith("17 ") or cmd.startswith("/saludred") or any(k in cmd for k in ["salud red", "red hidrometrica", "red hidrométrica"]):
+        send_telegram_text(chat_id, "⏳ <i>Verificando salud y disponibilidad de la red hidrométrica...</i>")
         try:
             txt = get_cfe_network_health_text(crp=detect_crp_from_text(cmd), only_issues=True)
             send_telegram_text(chat_id, f"<pre>{txt[:3900]}</pre>")

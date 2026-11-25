@@ -470,7 +470,7 @@ app.post('/sendCycloneNotice', async (req, res) => {
 });
 
 // Función central para procesar el menú de Centinela directamente en Node.js
-async function procesarMensajeCentinela(fromJid, text, msgId) {
+async function procesarMensajeCentinela(fromJid, text, msgId, msgKey = null) {
     if (!fromJid || !text) return;
     const rawBody = text.trim();
     // Limpiar prefijos de grupo (#, !, "centinela ") para que funcionen comandos en grupo y privado
@@ -483,6 +483,31 @@ async function procesarMensajeCentinela(fromJid, text, msgId) {
         return;
     }
     if (msgId) mensajesProcesados.set(msgId, now);
+
+    async function setTyping(active) {
+        try {
+            if (waSock) await waSock.sendPresenceUpdate(active ? 'composing' : 'paused', fromJid);
+        } catch (e) {}
+    }
+
+    async function reactMsg(emoji) {
+        try {
+            if (waSock && msgKey) {
+                await waSock.sendMessage(fromJid, { react: { text: emoji, key: msgKey } });
+            }
+        } catch (e) {}
+    }
+
+    async function notifyProcessing(label) {
+        await reactMsg('⏳');
+        await setTyping(true);
+        await sendMsg(`⏳ *${label}*\n_Un momento por favor..._`);
+    }
+
+    async function finishProcessing(ok = true) {
+        await setTyping(false);
+        await reactMsg(ok ? '✅' : '⚠️');
+    }
 
     async function sendMsg(t) {
         try {
@@ -516,110 +541,149 @@ async function procesarMensajeCentinela(fromJid, text, msgId) {
 
     // Modo IA (Google Gemini con telemetría en vivo de la red CFE)
     if (usuariosEnModoIA.has(fromJid)) {
-        await sendMsg("🤖 *Consultando telemetría CFE y analizando con Gemini IA...*");
+        await notifyProcessing("Consultando telemetría CFE y analizando con Gemini IA...");
         try {
             const ans = await askCentinelaAI(fromJid, body);
             await sendMsg(`🤖 *Centinela IA · Red CFE:*\n\n${ans}\n\n💡 _Escribe otra pregunta o 'volver' para regresar al menú._`);
+            await finishProcessing(true);
         } catch (e) {
             console.error('[CENTINELA-AI] Error:', e.message);
             await sendMsg("❌ Ocurrió un error al procesar tu consulta con IA. Escribe 'volver' para regresar al menú.");
+            await finishProcessing(false);
         }
         return;
     }
 
     // Opciones del Menú
     if (body === '1') {
+        await notifyProcessing("Obteniendo Reporte de Unidades...");
         const buf = await downloadAzureBlob(AZURE_CONTAINER, '9c8a7f42-3d91-4e01-a3fa-0d2e5b1c6f7d.png');
         if (buf) await sendImg(buf, '📊 *Reporte de Unidades actualizado.*', 'reporte_unidades.png');
         else await sendMsg('⚠️ No se pudo obtener el Reporte de Unidades en este momento.');
+        await finishProcessing(!!buf);
     } else if (body === '2') {
+        await notifyProcessing("Obteniendo captura de Power Monitoring...");
         const buf = await downloadAzureBlob(AZURE_CONTAINER, '6f3b2c91-91df-41b6-9a1e-c3f0d0c8e24a.png');
         if (buf) await sendImg(buf, '📊 *Captura del Power Monitoring.*', 'power_monitoring.png');
         else await sendMsg('⚠️ No se pudo obtener la captura de Power Monitoring.');
+        await finishProcessing(!!buf);
     } else if (body === '3') {
+        await notifyProcessing("Obteniendo Gráfica de Potencia...");
         const buf = await downloadAzureBlob(AZURE_CONTAINER, 'b7e1f9c3-8a2d-4f5d-9c3a-7f1f6e7a2c01.png');
         if (buf) await sendImg(buf, '📊 *Gráfica de potencia.*', 'grafica_potencia.png');
         else await sendMsg('⚠️ No se pudo obtener la gráfica de potencia.');
+        await finishProcessing(!!buf);
     } else if (body === '4') {
+        await notifyProcessing("Obteniendo Condición de Embalses...");
         const buf = await downloadAzureBlob(AZURE_CONTAINER, 'e1a5f734-9c2e-4b3b-8d5a-6f7e1d2c9b8f.png');
         if (buf) await sendImg(buf, '📊 *Condición de embalses.*', 'condicion_embalses.png');
         else await sendMsg('⚠️ No se pudo obtener la condición de embalses.');
+        await finishProcessing(!!buf);
     } else if (body === '5') {
+        await notifyProcessing("Obteniendo Aportaciones por Cuenca Propia...");
         const buf = await downloadAzureBlob(AZURE_CONTAINER, 'd42f3e19-b89c-4f02-90d4-3e7f4a6d2c01.png');
         if (buf) await sendImg(buf, '📊 *Aportaciones por cuenca propia.*', 'aportaciones_cuenca.png');
         else await sendMsg('⚠️ No se pudo obtener las aportaciones por cuenca.');
+        await finishProcessing(!!buf);
     } else if (body === '11') {
+        await notifyProcessing("Obteniendo Reporte de Lluvias 24h...");
         const buf = await downloadAzureBlob(AZURE_CONTAINER, 'reporte_lluvia_1_1_638848218556433423.png');
         if (buf) await sendImg(buf, '📊 *CFE SPH Grijalva - Reporte de lluvias 24 horas de 6am a 6am.*', 'lluvias_24h.png');
         else await sendMsg('⚠️ No se pudo obtener el reporte de lluvias 24 horas.');
+        await finishProcessing(!!buf);
     } else if (body === '12') {
+        await notifyProcessing("Obteniendo Reporte de Lluvias Parcial...");
         const buf = await downloadAzureBlob(AZURE_CONTAINER, 'reporte_lluvia_1_2_638848218556433423.png');
         if (buf) await sendImg(buf, '📊 *CFE SPH Grijalva - Reporte de lluvias parcial de 6am a hora actual.*', 'lluvias_parcial.png');
         else await sendMsg('⚠️ No se pudo obtener el reporte de lluvias parcial.');
+        await finishProcessing(!!buf);
     } else if (body === '13' || cleanCmd.startsWith('13 ') || cleanCmd.includes('cotas') || cleanCmd.includes('namo') || cleanCmd.includes('reporte embalse') || cleanCmd.includes('embalses ') || cleanCmd === 'embalses' || cleanCmd.includes('hidrocloud')) {
+        await notifyProcessing("Consultando niveles y volúmenes de embalses en tiempo real...");
         try {
             const targetCrp = detectCrpFromText(cleanCmd);
             const rep = await generateEmbalsesReport(targetCrp, 3);
             if (rep && rep.mensajeTexto) {
                 await sendMsg(rep.mensajeTexto);
+                await finishProcessing(true);
                 return;
             }
+            await finishProcessing(false);
         } catch (e) {
             console.error('[CENTINELA] Error generando reporte de embalses opción 13:', e.message);
             await sendMsg('⚠️ No fue posible consultar el reporte de embalses en este momento.');
+            await finishProcessing(false);
         }
     } else if (body === '14' || cleanCmd.startsWith('14 ') || cleanCmd === 'alertas' || cleanCmd.startsWith('alertas ') || cleanCmd.includes('alerta') || cleanCmd.includes('avenidas')) {
+        await notifyProcessing("Evaluando alertas hidráulicas e hidrométricas activas...");
         try {
             const targetCrp = detectCrpFromText(cleanCmd);
             const rep = await getAlertsReport({ crp: targetCrp });
             if (rep && rep.mensajeTexto) {
                 await sendMsg(rep.mensajeTexto);
+                await finishProcessing(true);
                 return;
             }
+            await finishProcessing(false);
         } catch (e) {
             console.error('[CENTINELA] Error consultando alertas opción 14:', e.message);
             await sendMsg('⚠️ No fue posible consultar las alertas hidráulicas en este momento.');
+            await finishProcessing(false);
         }
     } else if (body === '15' || cleanCmd.startsWith('15 ') || cleanCmd.includes('boletin') || cleanCmd.includes('boletín')) {
+        await notifyProcessing("Generando Boletín Hidrológico Diario Integral...");
         try {
             const targetCrp = detectCrpFromText(cleanCmd);
             const rep = await getDailyBulletinReport({ crp: targetCrp, cutoffHour: 6 });
             if (rep && rep.mensajeTexto) {
                 await sendMsg(rep.mensajeTexto);
+                await finishProcessing(true);
                 return;
             }
+            await finishProcessing(false);
         } catch (e) {
             console.error('[CENTINELA] Error generando boletín diario opción 15:', e.message);
             await sendMsg('⚠️ No fue posible generar el boletín hidrológico diario en este momento.');
+            await finishProcessing(false);
         }
     } else if (body === '16' || cleanCmd.startsWith('16 ') || cleanCmd.includes('lluvia cuenca') || cleanCmd.includes('lluvias cuenca') || cleanCmd.includes('corte lluvia')) {
+        await notifyProcessing("Calculando corte de lluvia 24h por cuenca (GOES)...");
         try {
             const rep = await getRainfallByBasinReport({ cutoffHour: 6 });
             if (rep && rep.mensajeTexto) {
                 await sendMsg(rep.mensajeTexto);
+                await finishProcessing(true);
                 return;
             }
+            await finishProcessing(false);
         } catch (e) {
             console.error('[CENTINELA] Error generando corte de lluvia por cuenca opción 16:', e.message);
             await sendMsg('⚠️ No fue posible consultar el corte de lluvia por cuenca en este momento.');
+            await finishProcessing(false);
         }
     } else if (body === '17' || cleanCmd.startsWith('17 ') || cleanCmd.includes('salud red') || cleanCmd.includes('red hidrometrica') || cleanCmd.includes('red hidrométrica') || cleanCmd.includes('estaciones caidas') || cleanCmd.includes('estaciones caídas') || cleanCmd === 'qa') {
+        await notifyProcessing("Verificando salud y disponibilidad de la red hidrométrica...");
         try {
             const targetCrp = detectCrpFromText(cleanCmd);
             const rep = await getNetworkHealthReport({ onlyIssues: true, crp: targetCrp });
             if (rep && rep.mensajeTexto) {
                 await sendMsg(rep.mensajeTexto);
+                await finishProcessing(true);
                 return;
             }
+            await finishProcessing(false);
         } catch (e) {
             console.error('[CENTINELA] Error consultando salud de red opción 17:', e.message);
             await sendMsg('⚠️ No fue posible consultar la salud de la red hidrométrica en este momento.');
+            await finishProcessing(false);
         }
     } else if (body === '7') {
+        await notifyProcessing("Consultando Reporte de Disponibilidad...");
         const buf = await downloadAzureBlob('reporte-unidades', 'telegram_report.txt');
         if (buf) await sendMsg(`📊 *Reporte de Disponibilidad*\n\n${buf.toString('utf8')}`);
         else await sendMsg('⚠️ No se pudo obtener el reporte de disponibilidad.');
+        await finishProcessing(!!buf);
     } else if (['8', '08', 'ciclon', 'ciclón', 'ciclones', 'huracan', 'huracán', 'tormenta'].includes(cleanCmd)) {
+        await notifyProcessing("Consultando avisos de ciclones tropicales (SMN / CONAGUA)...");
         try {
             const flaskPort = process.env.PORT || 8080;
             const resCyclones = await fetch(`http://127.0.0.1:${flaskPort}/api/cyclones`).then(r => r.json()).catch(() => null);
@@ -645,18 +709,21 @@ async function procesarMensajeCentinela(fromJid, text, msgId) {
                     "📡 _Monitoreo satelital continuo las 24 horas._"
                 );
             }
+            await finishProcessing(true);
         } catch (e) {
             await sendMsg(
                 "☀️ *MONITOREO DE CICLONES TROPICALES — CFE / SMN*\n\n" +
                 "✅ *Sin ciclones activos en este momento.*"
             );
+            await finishProcessing(true);
         }
     } else if (body === '6' || cleanCmd.startsWith('6 ') || cleanCmd.startsWith('ia ')) {
         if (cleanCmd.startsWith('6 ') || cleanCmd.startsWith('ia ')) {
             const directQ = body.replace(/^(?:6|ia)\s+/i, '').trim();
-            await sendMsg("🤖 *Consultando telemetría CFE y analizando con Gemini IA...*");
+            await notifyProcessing("Consultando telemetría CFE y analizando con Gemini IA...");
             const ans = await askCentinelaAI(fromJid, directQ);
             await sendMsg(`🤖 *Centinela IA · Red CFE:*\n\n${ans}`);
+            await finishProcessing(true);
             return;
         }
         usuariosEnModoIA.add(fromJid);
@@ -1052,7 +1119,7 @@ async function startBaileys() {
                     continue;
                 }
 
-                procesarMensajeCentinela(from, trimmed, msg.key.id);
+                procesarMensajeCentinela(from, trimmed, msg.key.id, msg.key);
             }
         });
 
