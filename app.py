@@ -24,6 +24,13 @@ from telegram_sender import send_cyclone_telegram, handle_incoming_telegram_upda
 from whatsapp_sender import send_cyclone_whatsapp
 from teams_sender import send_cyclone_teams
 from centinela_bot import handle_incoming_whatsapp_message, handle_incoming_teams_message, get_azure_blob_bytes
+from chart_generator import (
+    render_embalses_dashboard,
+    render_rainfall_basins_chart,
+    render_daily_bulletin_infographic,
+    render_network_health_dashboard,
+    render_dam_hydrograph_72h,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
@@ -1024,6 +1031,67 @@ def media_cyclone(filename):
         return resp
     except Exception as e:
         return f"Error leyendo imagen: {e}", 500
+
+
+@app.route("/api/charts/embalses.png", methods=["GET"])
+def chart_embalses_png():
+    try:
+        crp = request.args.get("crp") or request.args.get("region")
+        delta = int(request.args.get("delta_hours", "3"))
+        png = render_embalses_dashboard(crp=crp, delta_hours=delta)
+        return Response(png, mimetype="image/png", headers={"Cache-Control": "no-cache"})
+    except Exception as e:
+        logging.error(f"[CHARTS] Error en embalses.png: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/charts/lluvias.png", methods=["GET"])
+def chart_lluvias_png():
+    try:
+        cutoff_hour = int(request.args.get("cutoff_hour", "6"))
+        png = render_rainfall_basins_chart(cutoff_hour=cutoff_hour)
+        return Response(png, mimetype="image/png", headers={"Cache-Control": "no-cache"})
+    except Exception as e:
+        logging.error(f"[CHARTS] Error en lluvias.png: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/charts/boletin.png", methods=["GET"])
+def chart_boletin_png():
+    try:
+        crp = request.args.get("crp")
+        cutoff_hour = int(request.args.get("cutoff_hour", "6"))
+        png = render_daily_bulletin_infographic(crp=crp, cutoff_hour=cutoff_hour)
+        return Response(png, mimetype="image/png", headers={"Cache-Control": "no-cache"})
+    except Exception as e:
+        logging.error(f"[CHARTS] Error en boletin.png: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/charts/salud-red.png", methods=["GET"])
+def chart_salud_red_png():
+    try:
+        crp = request.args.get("crp")
+        png = render_network_health_dashboard(crp=crp)
+        return Response(png, mimetype="image/png", headers={"Cache-Control": "no-cache"})
+    except Exception as e:
+        logging.error(f"[CHARTS] Error en salud-red.png: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/charts/hidrograma.png", methods=["GET"])
+def chart_hidrograma_png():
+    presa = (request.args.get("presa") or "").strip()
+    if not presa:
+        return jsonify({"ok": False, "error": "Falta parámetro ?presa=..."}), 400
+    try:
+        png, caption = render_dam_hydrograph_72h(presa)
+        return Response(png, mimetype="image/png", headers={"Cache-Control": "no-cache", "X-Chart-Caption": caption.encode("latin-1", "ignore").decode("latin-1")})
+    except ValueError as ve:
+        return jsonify({"ok": False, "error": str(ve)}), 404
+    except Exception as e:
+        logging.error(f"[CHARTS] Error en hidrograma.png: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 @app.route("/health")

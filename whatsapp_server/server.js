@@ -110,13 +110,14 @@ function getMenuText() {
         "8️⃣ 🌀 Avisos de Ciclón Tropical (SMN / CONAGUA)\n" +
         "11️⃣ Reporte de lluvias 24h (6am a 6am)\n" +
         "12️⃣ Reporte de lluvias parcial\n" +
-        "13️⃣ 🌊 Reporte Operativo de Embalses (Cotas, Δ 3h, NAMO y Mm³)\n" +
+        "13️⃣ 🌊 Tablero Gráfico de Embalses (Cotas, Δ 3h, NAMO y Mm³)\n" +
         "14️⃣ 🚨 Alertas Hidráulicas, Avenidas y QA/QC en Tiempo Real\n" +
-        "15️⃣ 📋 Boletín Hidrológico Diario Integral (Balance Nacional)\n" +
-        "16️⃣ 🌧️ Corte de Lluvia 24h por Cuenca (GOES en vivo)\n" +
-        "17️⃣ 📡 Salud de la Red Hidrométrica (QA/QC)\n" +
-        "6️⃣ 🤖 Consultar con IA\n\n" +
-        "💡 *Tip:* Puedes pedir por región (ej. `13 sureste`, `13 balsas`, `14 sureste`). En modo IA escribe 'volver'."
+        "15️⃣ 📋 Infografía Boletín Hidrológico Diario (Balance Nacional)\n" +
+        "16️⃣ 🌧️ Gráfica de Lluvia 24h por Cuenca (GOES en vivo)\n" +
+        "17️⃣ 📡 Tablero de Salud de la Red Hidrométrica (QA/QC)\n" +
+        "📈 *Hidrograma 72h:* escribe `grafica <presa>` (ej. `grafica chicoasen`)\n" +
+        "6️⃣ 🤖 Consultar con IA (Gemini + Telemetría CFE)\n\n" +
+        "💡 *Tip:* Filtra por región (ej. `13 sureste`, `14 balsas`). En modo IA escribe 'volver'."
     );
 }
 
@@ -469,6 +470,24 @@ app.post('/sendCycloneNotice', async (req, res) => {
     }
 });
 
+async function fetchLocalChartPng(pathWithQuery, timeoutMs = 30000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        const res = await fetch(`http://127.0.0.1:${FLASK_PORT}${pathWithQuery}`, { signal: controller.signal });
+        if (!res.ok) {
+            const errTxt = await res.text().catch(() => '');
+            return { ok: false, status: res.status, error: errTxt };
+        }
+        const arrBuf = await res.arrayBuffer();
+        return { ok: true, buffer: Buffer.from(arrBuf), caption: res.headers.get('x-chart-caption') || '' };
+    } catch (e) {
+        return { ok: false, status: 0, error: e.message };
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
 // Función central para procesar el menú de Centinela directamente en Node.js
 async function procesarMensajeCentinela(fromJid, text, msgId, msgKey = null) {
     if (!fromJid || !text) return;
@@ -597,11 +616,42 @@ async function procesarMensajeCentinela(fromJid, text, msgId, msgKey = null) {
         if (buf) await sendImg(buf, '📊 *CFE SPH Grijalva - Reporte de lluvias parcial de 6am a hora actual.*', 'lluvias_parcial.png');
         else await sendMsg('⚠️ No se pudo obtener el reporte de lluvias parcial.');
         await finishProcessing(!!buf);
+    } else if (cleanCmd.startsWith('grafica ') || cleanCmd.startsWith('gráfica ') || cleanCmd.startsWith('hidrograma ')) {
+        const presaQ = body.replace(/^(?:grafica|gráfica|hidrograma)\s+/i, '').trim();
+        await notifyProcessing(`Generando hidrograma 72h de ${presaQ}...`);
+        try {
+            const chart = await fetchLocalChartPng(`/api/charts/hidrograma.png?presa=${encodeURIComponent(presaQ)}`);
+            if (chart.ok && chart.buffer) {
+                await sendImg(chart.buffer, chart.caption || `📈 *Hidrograma 72h — ${presaQ}*`, `hidrograma_${presaQ.replace(/\W+/g, '_')}.png`);
+                await finishProcessing(true);
+            } else {
+                let msgErr = `⚠️ No se encontró la presa *${presaQ}*. Prueba con: Angostura, Chicoasén, Malpaso, Peñitas, Infiernillo, Temascal, Aguamilpa o Santa Rosa.`;
+                try {
+                    const j = JSON.parse(chart.error || '{}');
+                    if (j.error) msgErr = `⚠️ ${j.error}`;
+                } catch (e) {}
+                await sendMsg(msgErr);
+                await finishProcessing(false);
+            }
+        } catch (e) {
+            await sendMsg('⚠️ No fue posible generar el hidrograma en este momento.');
+            await finishProcessing(false);
+        }
     } else if (body === '13' || cleanCmd.startsWith('13 ') || cleanCmd.includes('cotas') || cleanCmd.includes('namo') || cleanCmd.includes('reporte embalse') || cleanCmd.includes('embalses ') || cleanCmd === 'embalses' || cleanCmd.includes('hidrocloud')) {
-        await notifyProcessing("Consultando niveles y volúmenes de embalses en tiempo real...");
+        await notifyProcessing("Generando tablero gráfico y niveles de embalses en tiempo real...");
         try {
             const targetCrp = detectCrpFromText(cleanCmd);
-            const rep = await generateEmbalsesReport(targetCrp, 3);
+            const qs = targetCrp ? `?crp=${encodeURIComponent(targetCrp)}&delta_hours=3` : '?delta_hours=3';
+            const [chart, rep] = await Promise.all([
+                fetchLocalChartPng(`/api/charts/embalses.png${qs}`),
+                generateEmbalsesReport(targetCrp, 3).catch(() => null)
+            ]);
+            if (chart.ok && chart.buffer) {
+                const cap = rep?.mensajeTexto ? rep.mensajeTexto.slice(0, 1000) : `🌊 *Reporte Operativo de Embalses · ${targetCrp || 'NACIONAL'}*`;
+                await sendImg(chart.buffer, cap, `embalses_${targetCrp || 'nacional'}.png`);
+                await finishProcessing(true);
+                return;
+            }
             if (rep && rep.mensajeTexto) {
                 await sendMsg(rep.mensajeTexto);
                 await finishProcessing(true);
@@ -630,10 +680,20 @@ async function procesarMensajeCentinela(fromJid, text, msgId, msgKey = null) {
             await finishProcessing(false);
         }
     } else if (body === '15' || cleanCmd.startsWith('15 ') || cleanCmd.includes('boletin') || cleanCmd.includes('boletín')) {
-        await notifyProcessing("Generando Boletín Hidrológico Diario Integral...");
+        await notifyProcessing("Generando infografía del Boletín Hidrológico Diario Integral...");
         try {
             const targetCrp = detectCrpFromText(cleanCmd);
-            const rep = await getDailyBulletinReport({ crp: targetCrp, cutoffHour: 6 });
+            const qs = targetCrp ? `?crp=${encodeURIComponent(targetCrp)}&cutoff_hour=6` : '?cutoff_hour=6';
+            const [chart, rep] = await Promise.all([
+                fetchLocalChartPng(`/api/charts/boletin.png${qs}`),
+                getDailyBulletinReport({ crp: targetCrp, cutoffHour: 6 }).catch(() => null)
+            ]);
+            if (chart.ok && chart.buffer) {
+                const cap = rep?.mensajeTexto ? rep.mensajeTexto.slice(0, 1000) : '📋 *Boletín Hidrológico Diario Integral · CFE*';
+                await sendImg(chart.buffer, cap, 'boletin_hidrologico_cfe.png');
+                await finishProcessing(true);
+                return;
+            }
             if (rep && rep.mensajeTexto) {
                 await sendMsg(rep.mensajeTexto);
                 await finishProcessing(true);
@@ -646,9 +706,18 @@ async function procesarMensajeCentinela(fromJid, text, msgId, msgKey = null) {
             await finishProcessing(false);
         }
     } else if (body === '16' || cleanCmd.startsWith('16 ') || cleanCmd.includes('lluvia cuenca') || cleanCmd.includes('lluvias cuenca') || cleanCmd.includes('corte lluvia')) {
-        await notifyProcessing("Calculando corte de lluvia 24h por cuenca (GOES)...");
+        await notifyProcessing("Generando gráfica de corte de lluvia 24h por cuenca (GOES)...");
         try {
-            const rep = await getRainfallByBasinReport({ cutoffHour: 6 });
+            const [chart, rep] = await Promise.all([
+                fetchLocalChartPng('/api/charts/lluvias.png?cutoff_hour=6'),
+                getRainfallByBasinReport({ cutoffHour: 6 }).catch(() => null)
+            ]);
+            if (chart.ok && chart.buffer) {
+                const cap = rep?.mensajeTexto ? rep.mensajeTexto.slice(0, 1000) : '🌧️ *Corte de Lluvia 24h por Cuenca · CFE*';
+                await sendImg(chart.buffer, cap, 'lluvia_cuencas_24h.png');
+                await finishProcessing(true);
+                return;
+            }
             if (rep && rep.mensajeTexto) {
                 await sendMsg(rep.mensajeTexto);
                 await finishProcessing(true);
@@ -661,10 +730,20 @@ async function procesarMensajeCentinela(fromJid, text, msgId, msgKey = null) {
             await finishProcessing(false);
         }
     } else if (body === '17' || cleanCmd.startsWith('17 ') || cleanCmd.includes('salud red') || cleanCmd.includes('red hidrometrica') || cleanCmd.includes('red hidrométrica') || cleanCmd.includes('estaciones caidas') || cleanCmd.includes('estaciones caídas') || cleanCmd === 'qa') {
-        await notifyProcessing("Verificando salud y disponibilidad de la red hidrométrica...");
+        await notifyProcessing("Generando tablero QA/QC de salud de la red hidrométrica...");
         try {
             const targetCrp = detectCrpFromText(cleanCmd);
-            const rep = await getNetworkHealthReport({ onlyIssues: true, crp: targetCrp });
+            const qs = targetCrp ? `?crp=${encodeURIComponent(targetCrp)}` : '';
+            const [chart, rep] = await Promise.all([
+                fetchLocalChartPng(`/api/charts/salud-red.png${qs}`),
+                getNetworkHealthReport({ onlyIssues: true, crp: targetCrp }).catch(() => null)
+            ]);
+            if (chart.ok && chart.buffer) {
+                const cap = rep?.mensajeTexto ? rep.mensajeTexto.slice(0, 1000) : '📡 *Salud de la Red Hidrométrica · CFE*';
+                await sendImg(chart.buffer, cap, 'salud_red_cfe.png');
+                await finishProcessing(true);
+                return;
+            }
             if (rep && rep.mensajeTexto) {
                 await sendMsg(rep.mensajeTexto);
                 await finishProcessing(true);
@@ -838,11 +917,51 @@ async function enviarTextoAGruposEmbalses(texto, tag = 'CRON-EMBALSES', rawRecip
     return { ok: sent > 0, sent, recipients };
 }
 
+async function enviarImagenAGruposEmbalses(buffer, caption, filename, tag = 'CRON-EMBALSES', rawRecipients = null) {
+    if (!waSock || clientStatus !== 'READY') {
+        console.log(`[${tag}] WhatsApp no está listo, se omitirá este envío.`);
+        return { ok: false, sent: 0, reason: 'WHATSAPP_NOT_READY' };
+    }
+    const recipients = getEmbalsesRecipients(rawRecipients);
+    if (!recipients.length) {
+        return { ok: false, sent: 0, reason: 'NO_RECIPIENTS' };
+    }
+    if (caption) {
+        const prefix = caption.slice(0, 40);
+        recentSentTexts.add(prefix);
+        setTimeout(() => recentSentTexts.delete(prefix), 60000);
+    }
+    let sent = 0;
+    for (const jid of recipients) {
+        try {
+            const result = await waSock.sendMessage(jid, {
+                image: buffer,
+                caption: caption || '',
+                fileName: filename || 'reporte_cfe.png'
+            });
+            if (result?.key?.id) botSentMessageIds.add(result.key.id);
+            sent += 1;
+            console.log(`✅ [${tag}] Imagen enviada con éxito a ${jid} (${new Date().toLocaleTimeString('es-MX')})`);
+        } catch (err) {
+            console.error(`❌ [${tag}] Error enviando imagen a ${jid}:`, err.message);
+        }
+    }
+    return { ok: sent > 0, sent, recipients };
+}
+
 async function despacharReporteAutomaticoEmbalses(forceCrp = null) {
     try {
         const crpUse = forceCrp !== null ? forceCrp : (EMBALSES_AUTO_CRP === 'ALL' ? null : EMBALSES_AUTO_CRP);
         console.log(`[CRON-EMBALSES] Generando reporte automático 3h (CRP: ${crpUse || 'NACIONAL'})...`);
-        const rep = await buildScheduled3hMessage(crpUse);
+        const qs = crpUse ? `?crp=${encodeURIComponent(crpUse)}&delta_hours=3` : '?delta_hours=3';
+        const [chart, rep] = await Promise.all([
+            fetchLocalChartPng(`/api/charts/embalses.png${qs}`),
+            buildScheduled3hMessage(crpUse)
+        ]);
+        if (chart.ok && chart.buffer) {
+            const cap = rep?.mensajeTexto ? rep.mensajeTexto.slice(0, 1000) : `🌊 *Reporte Operativo de Embalses · ${crpUse || 'NACIONAL'}*`;
+            return await enviarImagenAGruposEmbalses(chart.buffer, cap, `embalses_${crpUse || 'nacional'}.png`, 'CRON-EMBALSES-3H');
+        }
         if (rep && rep.mensajeTexto) {
             return await enviarTextoAGruposEmbalses(rep.mensajeTexto, 'CRON-EMBALSES-3H');
         }
@@ -857,7 +976,15 @@ async function despacharBoletinDiarioAutomatico() {
     try {
         const crpUse = EMBALSES_AUTO_CRP === 'ALL' ? null : EMBALSES_AUTO_CRP;
         console.log(`[CRON-BOLETIN] Generando Boletín Hidrológico Diario 06:30 h (CRP: ${crpUse || 'NACIONAL'})...`);
-        const rep = await getDailyBulletinReport({ crp: crpUse, cutoffHour: 6 });
+        const qs = crpUse ? `?crp=${encodeURIComponent(crpUse)}&cutoff_hour=6` : '?cutoff_hour=6';
+        const [chart, rep] = await Promise.all([
+            fetchLocalChartPng(`/api/charts/boletin.png${qs}`),
+            getDailyBulletinReport({ crp: crpUse, cutoffHour: 6 })
+        ]);
+        if (chart.ok && chart.buffer) {
+            const cap = rep?.mensajeTexto ? rep.mensajeTexto.slice(0, 1000) : '📋 *Boletín Hidrológico Diario Integral · CFE*';
+            return await enviarImagenAGruposEmbalses(chart.buffer, cap, 'boletin_hidrologico_cfe.png', 'CRON-BOLETIN-DIARIO');
+        }
         if (rep && rep.mensajeTexto) {
             return await enviarTextoAGruposEmbalses(rep.mensajeTexto, 'CRON-BOLETIN-DIARIO');
         }

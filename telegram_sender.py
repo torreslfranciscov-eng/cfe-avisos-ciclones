@@ -481,15 +481,32 @@ def handle_incoming_telegram_update(payload, server_base_url="https://cfe-avisos
         else:
             send_telegram_text(chat_id, "⚠️ No se pudo obtener el reporte de lluvias parcial.")
 
-    # 11. Embalses en vivo (Opción 13)
-    elif cmd == "13" or cmd.startswith("13 ") or cmd.startswith("/embalses") or any(k in cmd for k in ["cotas", "namo", "reporte embalse"]):
-        send_telegram_text(chat_id, "⏳ <i>Consultando niveles y volúmenes de embalses en tiempo real...</i>")
+    # 11. Hidrograma 72h por presa (grafica <presa>)
+    elif cmd.startswith("grafica ") or cmd.startswith("gráfica ") or cmd.startswith("hidrograma "):
+        presa_q = raw_text.split(None, 1)[1].strip() if len(raw_text.split(None, 1)) > 1 else ""
+        send_telegram_text(chat_id, f"⏳ <i>Generando hidrograma 72h de {presa_q}...</i>")
         try:
-            txt = get_cfe_embalses_text(crp=detect_crp_from_text(cmd), delta_hours=3)
-            send_telegram_text(chat_id, f"<pre>{txt[:3900]}</pre>")
+            from chart_generator import render_dam_hydrograph_72h
+            png, cap = render_dam_hydrograph_72h(presa_q)
+            send_telegram_photo(chat_id, png, cap.replace("*", ""), f"hidrograma_{presa_q}.png")
         except Exception as e:
-            logging.error(f"[TELEGRAM] Error opción 13: {e}")
-            send_telegram_text(chat_id, "⚠️ No fue posible consultar el reporte de embalses en este momento.")
+            send_telegram_text(chat_id, f"⚠️ {e}")
+
+    # 11b. Embalses en vivo (Opción 13)
+    elif cmd == "13" or cmd.startswith("13 ") or cmd.startswith("/embalses") or any(k in cmd for k in ["cotas", "namo", "reporte embalse"]):
+        send_telegram_text(chat_id, "⏳ <i>Generando tablero gráfico y niveles de embalses...</i>")
+        try:
+            crp_sel = detect_crp_from_text(cmd)
+            from chart_generator import render_embalses_dashboard
+            png = render_embalses_dashboard(crp=crp_sel, delta_hours=3)
+            send_telegram_photo(chat_id, png, f"🌊 <b>Reporte Operativo de Embalses · {crp_sel or 'NACIONAL'}</b>", "embalses.png")
+        except Exception as e:
+            logging.error(f"[TELEGRAM] Error gráfico opción 13: {e}")
+            try:
+                txt = get_cfe_embalses_text(crp=detect_crp_from_text(cmd), delta_hours=3)
+                send_telegram_text(chat_id, f"<pre>{txt[:3900]}</pre>")
+            except Exception:
+                send_telegram_text(chat_id, "⚠️ No fue posible consultar el reporte de embalses en este momento.")
 
     # 12. Alertas Hidráulicas e Hidrométricas (Opción 14)
     elif cmd == "14" or cmd.startswith("14 ") or cmd.startswith("/alertas") or any(k in cmd for k in ["alertas", "avenidas"]):
@@ -503,33 +520,50 @@ def handle_incoming_telegram_update(payload, server_base_url="https://cfe-avisos
 
     # 13. Boletín Diario Integral (Opción 15)
     elif cmd == "15" or cmd.startswith("15 ") or cmd.startswith("/boletin") or any(k in cmd for k in ["boletin", "boletín"]):
-        send_telegram_text(chat_id, "⏳ <i>Generando Boletín Hidrológico Diario Integral...</i>")
+        send_telegram_text(chat_id, "⏳ <i>Generando infografía del Boletín Hidrológico Diario...</i>")
         try:
-            txt = get_cfe_daily_bulletin_text(crp=detect_crp_from_text(cmd), cutoff_hour=6)
-            send_telegram_text(chat_id, f"<pre>{txt[:3900]}</pre>")
+            crp_sel = detect_crp_from_text(cmd)
+            from chart_generator import render_daily_bulletin_infographic
+            png = render_daily_bulletin_infographic(crp=crp_sel, cutoff_hour=6)
+            send_telegram_photo(chat_id, png, "📋 <b>Boletín Hidrológico Diario Integral · CFE</b>", "boletin.png")
         except Exception as e:
-            logging.error(f"[TELEGRAM] Error opción 15: {e}")
-            send_telegram_text(chat_id, "⚠️ No fue posible generar el boletín hidrológico diario.")
+            logging.error(f"[TELEGRAM] Error gráfico opción 15: {e}")
+            try:
+                txt = get_cfe_daily_bulletin_text(crp=detect_crp_from_text(cmd), cutoff_hour=6)
+                send_telegram_text(chat_id, f"<pre>{txt[:3900]}</pre>")
+            except Exception:
+                send_telegram_text(chat_id, "⚠️ No fue posible generar el boletín hidrológico diario.")
 
     # 14. Corte de Lluvia por Cuenca (Opción 16)
     elif cmd == "16" or cmd.startswith("16 ") or cmd.startswith("/lluviacuencas") or any(k in cmd for k in ["lluvia cuenca", "lluvias cuenca", "corte lluvia"]):
-        send_telegram_text(chat_id, "⏳ <i>Calculando corte de lluvia 24h por cuenca (GOES)...</i>")
+        send_telegram_text(chat_id, "⏳ <i>Generando gráfica de corte de lluvia 24h por cuenca (GOES)...</i>")
         try:
-            txt = get_cfe_rainfall_by_basin_text(cutoff_hour=6)
-            send_telegram_text(chat_id, f"<pre>{txt[:3900]}</pre>")
+            from chart_generator import render_rainfall_basins_chart
+            png = render_rainfall_basins_chart(cutoff_hour=6)
+            send_telegram_photo(chat_id, png, "🌧️ <b>Corte de Lluvia 24h por Cuenca · Red GOES CFE</b>", "lluvias_cuencas.png")
         except Exception as e:
-            logging.error(f"[TELEGRAM] Error opción 16: {e}")
-            send_telegram_text(chat_id, "⚠️ No fue posible consultar el corte de lluvia por cuenca.")
+            logging.error(f"[TELEGRAM] Error gráfico opción 16: {e}")
+            try:
+                txt = get_cfe_rainfall_by_basin_text(cutoff_hour=6)
+                send_telegram_text(chat_id, f"<pre>{txt[:3900]}</pre>")
+            except Exception:
+                send_telegram_text(chat_id, "⚠️ No fue posible consultar el corte de lluvia por cuenca.")
 
     # 15. Salud de Red Hidrométrica (Opción 17)
     elif cmd == "17" or cmd.startswith("17 ") or cmd.startswith("/saludred") or any(k in cmd for k in ["salud red", "red hidrometrica", "red hidrométrica"]):
-        send_telegram_text(chat_id, "⏳ <i>Verificando salud y disponibilidad de la red hidrométrica...</i>")
+        send_telegram_text(chat_id, "⏳ <i>Generando tablero QA/QC de salud de la red hidrométrica...</i>")
         try:
-            txt = get_cfe_network_health_text(crp=detect_crp_from_text(cmd), only_issues=True)
-            send_telegram_text(chat_id, f"<pre>{txt[:3900]}</pre>")
+            crp_sel = detect_crp_from_text(cmd)
+            from chart_generator import render_network_health_dashboard
+            png = render_network_health_dashboard(crp=crp_sel)
+            send_telegram_photo(chat_id, png, "📡 <b>Salud de la Red Hidrométrica GOES · QA/QC CFE</b>", "salud_red.png")
         except Exception as e:
-            logging.error(f"[TELEGRAM] Error opción 17: {e}")
-            send_telegram_text(chat_id, "⚠️ No fue posible consultar la salud de la red hidrométrica.")
+            logging.error(f"[TELEGRAM] Error gráfico opción 17: {e}")
+            try:
+                txt = get_cfe_network_health_text(crp=detect_crp_from_text(cmd), only_issues=True)
+                send_telegram_text(chat_id, f"<pre>{txt[:3900]}</pre>")
+            except Exception:
+                send_telegram_text(chat_id, "⚠️ No fue posible consultar la salud de la red hidrométrica.")
 
     # 11. Consulta de Inteligencia Artificial
     else:

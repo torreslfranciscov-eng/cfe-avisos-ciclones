@@ -1352,13 +1352,17 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
         ]
         return _wrap_teams_card(body, [_menu_action()])
 
-    # 11. Embalses en Vivo (Opción 13)
+    # 11. Embalses en Vivo (Opción 13 — Tablero PNG)
     if cmd == "13" or cmd.startswith("13 ") or any(k in cmd for k in ["namo", "reporte embalse", "hidrocloud"]):
-        try:
-            txt = get_cfe_embalses_text(crp=detect_crp_from_text(cmd), delta_hours=3)
-        except Exception as e:
-            txt = f"⚠️ Error consultando embalses: {e}"
-        return _wrap_teams_card([_build_teams_header("🌊 Reporte Operativo de Embalses · CFE"), {"type": "TextBlock", "text": txt, "wrap": True, "fontType": "Monospace"}, _build_teams_footer()], [_menu_action()])
+        crp_sel = detect_crp_from_text(cmd)
+        qs = f"?crp={urllib.parse.quote(crp_sel)}&delta_hours=3" if crp_sel else "?delta_hours=3"
+        img_url = f"{server_base_url}/api/charts/embalses.png{qs}"
+        body = [
+            _build_teams_header(f"🌊 Reporte Operativo de Embalses · {crp_sel or 'NACIONAL'}"),
+            {"type": "Image", "url": img_url, "altText": "Tablero de Embalses CFE", "size": "Stretch", "selectAction": {"type": "Action.OpenUrl", "url": img_url}},
+            _build_teams_footer(),
+        ]
+        return _wrap_teams_card(body, [{"type": "Action.OpenUrl", "title": "🔍 Ver Tablero Completo", "url": img_url}, _menu_action()])
 
     # 12. Alertas Hidráulicas (Opción 14)
     if cmd == "14" or cmd.startswith("14 ") or any(k in cmd for k in ["alertas", "avenidas"]):
@@ -1368,29 +1372,50 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
             txt = f"⚠️ Error consultando alertas: {e}"
         return _wrap_teams_card([_build_teams_header("🚨 Alertas Hidráulicas e Hidrométricas · CFE"), {"type": "TextBlock", "text": txt, "wrap": True, "fontType": "Monospace"}, _build_teams_footer()], [_menu_action()])
 
-    # 13. Boletín Diario (Opción 15)
+    # 13. Boletín Diario (Opción 15 — Infografía PNG)
     if cmd == "15" or cmd.startswith("15 ") or any(k in cmd for k in ["boletin", "boletín"]):
-        try:
-            txt = get_cfe_daily_bulletin_text(crp=detect_crp_from_text(cmd), cutoff_hour=6)
-        except Exception as e:
-            txt = f"⚠️ Error generando boletín diario: {e}"
-        return _wrap_teams_card([_build_teams_header("📋 Boletín Hidrológico Diario · CFE"), {"type": "TextBlock", "text": txt, "wrap": True, "fontType": "Monospace"}, _build_teams_footer()], [_menu_action()])
+        crp_sel = detect_crp_from_text(cmd)
+        qs = f"?crp={urllib.parse.quote(crp_sel)}&cutoff_hour=6" if crp_sel else "?cutoff_hour=6"
+        img_url = f"{server_base_url}/api/charts/boletin.png{qs}"
+        body = [
+            _build_teams_header("📋 Boletín Hidrológico Diario Integral · CFE"),
+            {"type": "Image", "url": img_url, "altText": "Boletín Diario CFE", "size": "Stretch", "selectAction": {"type": "Action.OpenUrl", "url": img_url}},
+            _build_teams_footer(),
+        ]
+        return _wrap_teams_card(body, [{"type": "Action.OpenUrl", "title": "🔍 Ver Infografía", "url": img_url}, _menu_action()])
 
-    # 14. Lluvia por Cuenca (Opción 16)
+    # 14. Lluvia por Cuenca (Opción 16 — Gráfica PNG)
     if cmd == "16" or cmd.startswith("16 ") or any(k in cmd for k in ["lluvia cuenca", "lluvias cuenca", "corte lluvia"]):
-        try:
-            txt = get_cfe_rainfall_by_basin_text(cutoff_hour=6)
-        except Exception as e:
-            txt = f"⚠️ Error consultando lluvia por cuenca: {e}"
-        return _wrap_teams_card([_build_teams_header("🌧️ Corte de Lluvia 24h por Cuenca · CFE"), {"type": "TextBlock", "text": txt, "wrap": True}, _build_teams_footer()], [_menu_action()])
+        img_url = f"{server_base_url}/api/charts/lluvias.png?cutoff_hour=6"
+        body = [
+            _build_teams_header("🌧️ Corte de Lluvia 24h por Cuenca · Red GOES CFE"),
+            {"type": "Image", "url": img_url, "altText": "Lluvias por Cuenca CFE", "size": "Stretch", "selectAction": {"type": "Action.OpenUrl", "url": img_url}},
+            _build_teams_footer(),
+        ]
+        return _wrap_teams_card(body, [{"type": "Action.OpenUrl", "title": "🔍 Ver Gráfica", "url": img_url}, _menu_action()])
 
-    # 15. Salud de Red Hidrométrica (Opción 17)
+    # 15. Salud de Red Hidrométrica (Opción 17 — Tablero PNG)
     if cmd == "17" or cmd.startswith("17 ") or any(k in cmd for k in ["salud red", "red hidrometrica", "red hidrométrica"]):
-        try:
-            txt = get_cfe_network_health_text(crp=detect_crp_from_text(cmd), only_issues=True)
-        except Exception as e:
-            txt = f"⚠️ Error consultando salud de red: {e}"
-        return _wrap_teams_card([_build_teams_header("📡 Salud de la Red Hidrométrica · CFE"), {"type": "TextBlock", "text": txt, "wrap": True, "fontType": "Monospace"}, _build_teams_footer()], [_menu_action()])
+        crp_sel = detect_crp_from_text(cmd)
+        qs = f"?crp={urllib.parse.quote(crp_sel)}" if crp_sel else ""
+        img_url = f"{server_base_url}/api/charts/salud-red.png{qs}"
+        body = [
+            _build_teams_header("📡 Salud de la Red Hidrométrica · QA/QC CFE"),
+            {"type": "Image", "url": img_url, "altText": "Salud de la Red CFE", "size": "Stretch", "selectAction": {"type": "Action.OpenUrl", "url": img_url}},
+            _build_teams_footer(),
+        ]
+        return _wrap_teams_card(body, [{"type": "Action.OpenUrl", "title": "🔍 Ver Tablero QA/QC", "url": img_url}, _menu_action()])
+
+    # 16. Hidrograma 72h por presa (grafica <presa>)
+    if cmd.startswith("grafica ") or cmd.startswith("gráfica ") or cmd.startswith("hidrograma "):
+        presa_q = clean_text.split(None, 1)[1].strip() if len(clean_text.split(None, 1)) > 1 else "Chicoasén"
+        img_url = f"{server_base_url}/api/charts/hidrograma.png?presa={urllib.parse.quote(presa_q)}"
+        body = [
+            _build_teams_header(f"📈 Hidrograma 72h · {presa_q}"),
+            {"type": "Image", "url": img_url, "altText": f"Hidrograma {presa_q}", "size": "Stretch", "selectAction": {"type": "Action.OpenUrl", "url": img_url}},
+            _build_teams_footer(),
+        ]
+        return _wrap_teams_card(body, [{"type": "Action.OpenUrl", "title": "🔍 Ver Hidrograma", "url": img_url}, _menu_action()])
 
     # 10. Consulta con Inteligencia Artificial (Opción 6 o preguntas abiertas)
     question = clean_text
