@@ -647,8 +647,10 @@ async function procesarMensajeCentinela(fromJid, text, msgId, msgKey = null) {
                 generateEmbalsesReport(targetCrp, 3).catch(() => null)
             ]);
             if (chart.ok && chart.buffer) {
-                const cap = rep?.mensajeTexto ? rep.mensajeTexto.slice(0, 1000) : `🌊 *Reporte Operativo de Embalses · ${targetCrp || 'NACIONAL'}*`;
-                await sendImg(chart.buffer, cap, `embalses_${targetCrp || 'nacional'}.png`);
+                await sendImg(chart.buffer, `🌊 *Tablero Operativo de Embalses · ${targetCrp || 'NACIONAL'}*\n📅 ${rep?.fechaCorte || ''} h · _Detalle completo abajo ⬇️_`, `embalses_${targetCrp || 'nacional'}.png`);
+                if (rep && rep.mensajeTexto) {
+                    await sendMsg(rep.mensajeTexto);
+                }
                 await finishProcessing(true);
                 return;
             }
@@ -689,8 +691,10 @@ async function procesarMensajeCentinela(fromJid, text, msgId, msgKey = null) {
                 getDailyBulletinReport({ crp: targetCrp, cutoffHour: 6 }).catch(() => null)
             ]);
             if (chart.ok && chart.buffer) {
-                const cap = rep?.mensajeTexto ? rep.mensajeTexto.slice(0, 1000) : '📋 *Boletín Hidrológico Diario Integral · CFE*';
-                await sendImg(chart.buffer, cap, 'boletin_hidrologico_cfe.png');
+                await sendImg(chart.buffer, '📋 *Boletín Hidrológico Diario Integral · CFE*\n_Detalle completo abajo ⬇️_', 'boletin_hidrologico_cfe.png');
+                if (rep && rep.mensajeTexto) {
+                    await sendMsg(rep.mensajeTexto);
+                }
                 await finishProcessing(true);
                 return;
             }
@@ -713,8 +717,10 @@ async function procesarMensajeCentinela(fromJid, text, msgId, msgKey = null) {
                 getRainfallByBasinReport({ cutoffHour: 6 }).catch(() => null)
             ]);
             if (chart.ok && chart.buffer) {
-                const cap = rep?.mensajeTexto ? rep.mensajeTexto.slice(0, 1000) : '🌧️ *Corte de Lluvia 24h por Cuenca · CFE*';
-                await sendImg(chart.buffer, cap, 'lluvia_cuencas_24h.png');
+                await sendImg(chart.buffer, '🌧️ *Corte de Lluvia 24h por Cuenca · Red GOES CFE*\n_Detalle completo abajo ⬇️_', 'lluvia_cuencas_24h.png');
+                if (rep && rep.mensajeTexto) {
+                    await sendMsg(rep.mensajeTexto);
+                }
                 await finishProcessing(true);
                 return;
             }
@@ -739,8 +745,10 @@ async function procesarMensajeCentinela(fromJid, text, msgId, msgKey = null) {
                 getNetworkHealthReport({ onlyIssues: true, crp: targetCrp }).catch(() => null)
             ]);
             if (chart.ok && chart.buffer) {
-                const cap = rep?.mensajeTexto ? rep.mensajeTexto.slice(0, 1000) : '📡 *Salud de la Red Hidrométrica · CFE*';
-                await sendImg(chart.buffer, cap, 'salud_red_cfe.png');
+                await sendImg(chart.buffer, '📡 *Salud de la Red Hidrométrica · QA/QC CFE*\n_Detalle completo abajo ⬇️_', 'salud_red_cfe.png');
+                if (rep && rep.mensajeTexto) {
+                    await sendMsg(rep.mensajeTexto);
+                }
                 await finishProcessing(true);
                 return;
             }
@@ -959,8 +967,16 @@ async function despacharReporteAutomaticoEmbalses(forceCrp = null) {
             buildScheduled3hMessage(crpUse)
         ]);
         if (chart.ok && chart.buffer) {
-            const cap = rep?.mensajeTexto ? rep.mensajeTexto.slice(0, 1000) : `🌊 *Reporte Operativo de Embalses · ${crpUse || 'NACIONAL'}*`;
-            return await enviarImagenAGruposEmbalses(chart.buffer, cap, `embalses_${crpUse || 'nacional'}.png`, 'CRON-EMBALSES-3H');
+            const imgRes = await enviarImagenAGruposEmbalses(
+                chart.buffer,
+                `🌊 *Reporte Operativo de Embalses · ${crpUse || 'NACIONAL'}*\n📅 ${rep?.fechaCorte || ''} h`,
+                `embalses_${crpUse || 'nacional'}.png`,
+                'CRON-EMBALSES-3H'
+            );
+            if (rep && rep.mensajeTexto) {
+                await enviarTextoAGruposEmbalses(rep.mensajeTexto, 'CRON-EMBALSES-3H-TXT');
+            }
+            return imgRes;
         }
         if (rep && rep.mensajeTexto) {
             return await enviarTextoAGruposEmbalses(rep.mensajeTexto, 'CRON-EMBALSES-3H');
@@ -982,8 +998,16 @@ async function despacharBoletinDiarioAutomatico() {
             getDailyBulletinReport({ crp: crpUse, cutoffHour: 6 })
         ]);
         if (chart.ok && chart.buffer) {
-            const cap = rep?.mensajeTexto ? rep.mensajeTexto.slice(0, 1000) : '📋 *Boletín Hidrológico Diario Integral · CFE*';
-            return await enviarImagenAGruposEmbalses(chart.buffer, cap, 'boletin_hidrologico_cfe.png', 'CRON-BOLETIN-DIARIO');
+            const imgRes = await enviarImagenAGruposEmbalses(
+                chart.buffer,
+                '📋 *Boletín Hidrológico Diario Integral · CFE*',
+                'boletin_hidrologico_cfe.png',
+                'CRON-BOLETIN-DIARIO'
+            );
+            if (rep && rep.mensajeTexto) {
+                await enviarTextoAGruposEmbalses(rep.mensajeTexto, 'CRON-BOLETIN-DIARIO-TXT');
+            }
+            return imgRes;
         }
         if (rep && rep.mensajeTexto) {
             return await enviarTextoAGruposEmbalses(rep.mensajeTexto, 'CRON-BOLETIN-DIARIO');
