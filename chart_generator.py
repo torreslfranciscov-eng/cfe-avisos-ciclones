@@ -125,9 +125,10 @@ def render_embalses_dashboard(crp: str | None = None, delta_hours: int = 3) -> b
     tot_libre = max(0.0, tot_cap - tot_util)
     tot_pct = (tot_util / tot_cap * 100.0) if tot_cap > 0 else 0.0
 
-    # Presas para la tabla (priorizar con volumen + Peñitas salida; incluir escala local al final compacta)
+    # Presas para la tabla (priorizar con volumen + Peñitas salida; incluir escala local operativa, excluir sensores en 0.00)
     dams_msnm = [x for x in items if not x.get("nivel_en_escala_local")]
-    dams_local = [x for x in items if x.get("nivel_en_escala_local")]
+    dams_local = [x for x in items if x.get("nivel_en_escala_local") and (x.get("nivel_actual") or 0) > 0.05]
+    dams_zero = [x for x in items if x.get("nivel_en_escala_local") and (x.get("nivel_actual") or 0) <= 0.05]
     table_rows = dams_msnm + dams_local[:6]
 
     fig_h = max(8.5, 4.8 + 0.36 * len(dams_vol) + 0.28 * len(table_rows))
@@ -208,8 +209,13 @@ def render_embalses_dashboard(crp: str | None = None, delta_hours: int = 3) -> b
             pct_str = f"{it['pct_llenado_util']:.1f}%" if it.get("pct_llenado_util") is not None else "—"
             lib_str = f"{it['volumen_disponible_namo_mm3']:,.1f}" if it.get("volumen_disponible_namo_mm3") is not None else "—"
 
-        name_lbl = f"{it['estacion']} [{it['clave_cenace']}]" if it.get("clave_cenace") else it["estacion"]
-        cell_text.append([it["crp"], name_lbl[:30], lvl_str, d_str, namo_str, util_str, pct_str, lib_str])
+        clave = it.get("clave_cenace")
+        base_n = it["estacion"] or ""
+        if clave:
+            name_lbl = f"{base_n[:23]} [{clave}]"
+        else:
+            name_lbl = base_n[:30]
+        cell_text.append([it["crp"], name_lbl, lvl_str, d_str, namo_str, util_str, pct_str, lib_str])
 
         sem_bg = row_bg
         if it.get("semaforo") == "ROJO":
@@ -238,8 +244,14 @@ def render_embalses_dashboard(crp: str | None = None, delta_hours: int = 3) -> b
             elif c_idx == 1:
                 cell.set_text_props(ha="left")
 
+    notes = []
     if dams_local:
-        fig.text(0.025, 0.008, f"* Nota: {len(dams_local)} presa(s) reportan tirante en escala local sin cota msnm.", fontsize=8, color=TEXT_MUTED)
+        notes.append(f"* {len(dams_local)} presa(s) en escala local sin cota msnm")
+    if dams_zero:
+        z_names = ", ".join(x["estacion"] for x in dams_zero[:5])
+        notes.append(f"Sensores en 0.00 (revisión en campo): {z_names}")
+    if notes:
+        fig.text(0.025, 0.008, " · ".join(notes), fontsize=8, color=TEXT_MUTED)
 
     return _fig_to_png_bytes(fig)
 
