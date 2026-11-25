@@ -26,6 +26,97 @@ AZURE_CONTAINER = os.getenv("AZURE_STORAGE_CONTAINER", "unidades")
 _D_DEF = [81, 65, 87, 83, 82, 88, 78, 89, 88, 76, 88, 79, 88, 89, 89, 94, 94, 89, 90, 89, 91, 88, 88, 90, 83, 91, 88, 82, 84, 90, 91, 88, 88, 89, 88, 90]
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY") or "".join(chr(c ^ 42) for c in _D_DEF)
 
+CFE_MIRROR_API_URL = os.getenv("CFE_MIRROR_API_URL", "https://cfe-mirror-api.onrender.com").rstrip("/")
+CFE_MIRROR_API_KEY = os.getenv("CFE_MIRROR_API_KEY", "cfe_live_rWCDtjwhU-nEbp-jlMq0uMV4-AiwrU9lp1jWRw").strip()
+
+
+def detect_crp_from_text(text):
+    low = (text or "").lower()
+    if "sureste" in low or "grijalva" in low:
+        return "SURESTE"
+    if "golfo" in low or "papaloapan" in low:
+        return "GOLFO"
+    if "balsas" in low:
+        return "BALSAS"
+    if "santiago" in low:
+        return "SANTIAGO"
+    if "noroeste" in low or "pacifico" in low:
+        return "NOROESTE"
+    return None
+
+
+def fetch_cfe_mirror(endpoint, params=None, timeout=25):
+    """Consulta oficial a CFE Mirror API (Render) con X-API-Key."""
+    url = f"{CFE_MIRROR_API_URL}{endpoint}"
+    headers = {
+        "X-API-Key": CFE_MIRROR_API_KEY,
+        "Accept": "application/json",
+        "User-Agent": "Centinela-CFE-Py/2.0",
+    }
+    clean_params = {k: v for k, v in (params or {}).items() if v is not None and v != ""}
+    r = requests.get(url, headers=headers, params=clean_params, timeout=timeout)
+    r.raise_for_status()
+    return r.json()
+
+
+def get_cfe_embalses_text(crp=None, delta_hours=3):
+    data = fetch_cfe_mirror("/api/v1/water-levels", {
+        "only_dams": "true",
+        "delta_hours": delta_hours,
+        "include_text": "true",
+        "crp": crp,
+    })
+    return data.get("resumen_texto") or "⚠️ Sin datos de embalses disponibles."
+
+
+def get_cfe_alerts_text(crp=None, severity=None, category=None):
+    data = fetch_cfe_mirror("/api/v1/alerts", {
+        "include_text": "true",
+        "crp": crp,
+        "severity": severity,
+        "category": category,
+    })
+    return data.get("resumen_texto") or "🟢 Sin alertas activas en este momento."
+
+
+def get_cfe_daily_bulletin_text(crp=None, cutoff_hour=6):
+    data = fetch_cfe_mirror("/api/v1/daily-bulletin", {
+        "include_text": "true",
+        "cutoff_hour": cutoff_hour,
+        "crp": crp,
+    })
+    return data.get("resumen_texto") or "⚠️ No se pudo generar el boletín hidrológico diario."
+
+
+def get_cfe_network_health_text(crp=None, only_issues=True):
+    data = fetch_cfe_mirror("/api/v1/network-health", {
+        "include_text": "true",
+        "only_issues": "true" if only_issues else "false",
+        "crp": crp,
+    })
+    return data.get("resumen_texto") or "⚠️ No se pudo consultar la salud de la red."
+
+
+def get_cfe_rainfall_by_basin_text(cutoff_hour=6):
+    data = fetch_cfe_mirror("/api/v1/rainfall-cut/by-basin", {"cutoff_hour": cutoff_hour})
+    basins = data.get("data") or []
+    rainy = [b for b in basins if (b.get("lamina_max_24h_mm") or 0) > 0]
+    lines = [
+        "CORTE DE LLUVIA POR CUENCA · CFE",
+        f"📅 Corte: {data.get('cutoff_date_local', '')} ({cutoff_hour:02d}:00 h)",
+        f"🕒 Ventana: {data.get('window_local', '')}",
+        f"🌧️ Cuencas con lluvia: {data.get('basins_with_rain', 0)} de {data.get('basins_count', len(basins))}",
+        "",
+    ]
+    if not rainy:
+        lines.append("☀️ Sin precipitaciones registradas en las cuencas CFE durante el corte de 24 horas.")
+    else:
+        for b in rainy[:15]:
+            lines.append(
+                f"🌧️ *{b['cuenca']}*: media {b['lamina_media_24h_mm']:.1f} mm · máx {b['lamina_max_24h_mm']:.1f} mm ({b.get('estacion_max_nombre') or 'N/D'}) [{b['estaciones_con_lluvia']}/{b['estaciones_con_datos']} est.]"
+            )
+    return "\n".join(lines).strip()
+
 # Estado y caché en memoria
 mensajes_procesados = {}
 usuarios_en_modo_ia = {}
@@ -251,9 +342,13 @@ def get_menu_text():
         "8️⃣ 🌀 Avisos de Ciclón Tropical (SMN / CONAGUA)\n"
         "11️⃣ Reporte de lluvias 24h (6am a 6am)\n"
         "12️⃣ Reporte de lluvias parcial\n"
-        "13️⃣ 🌊 Reporte Operativo de Embalses (Cotas, Δ y NAMO)\n"
+        "13️⃣ 🌊 Reporte Operativo de Embalses (Cotas, Δ 3h, NAMO y Mm³)\n"
+        "14️⃣ 🚨 Alertas Hidráulicas, Avenidas y QA/QC en Tiempo Real\n"
+        "15️⃣ 📋 Boletín Hidrológico Diario Integral (Balance Nacional)\n"
+        "16️⃣ 🌧️ Corte de Lluvia 24h por Cuenca (GOES en vivo)\n"
+        "17️⃣ 📡 Salud de la Red Hidrométrica (QA/QC)\n"
         "6️⃣ 🤖 Consultar con IA\n\n"
-        "💡 *Tip:* En modo IA, escribe 'volver' para regresar aquí."
+        "💡 *Tip:* Puedes filtrar por región (ej. `13 sureste`, `14 balsas`). En modo IA escribe 'volver'."
     )
 
 
@@ -429,17 +524,45 @@ def handle_incoming_whatsapp_message(payload):
         else:
             send_wa_text(from_jid, "⚠️ No se pudo obtener el reporte de disponibilidad.")
 
-    elif text == "13" or any(k in text.lower() for k in ["cotas", "namo", "reporte embalse", "hidrocloud"]):
+    elif text == "13" or text.lower().startswith("13 ") or any(k in text.lower() for k in ["cotas", "namo", "reporte embalse", "embalses", "hidrocloud"]):
         try:
-            r = requests.get("http://127.0.0.1:8086/api/embalses/reporte?region=SURESTE&deltaHours=3", timeout=10)
-            if r.status_code == 200 and r.json().get("ok"):
-                rep_text = r.json()["report"]["mensajeTexto"]
-                send_wa_text(from_jid, rep_text)
-            else:
-                send_wa_text(from_jid, "⚠️ No se pudo obtener el reporte de embalses en este momento.")
+            rep_text = get_cfe_embalses_text(crp=detect_crp_from_text(text), delta_hours=3)
+            send_wa_text(from_jid, rep_text)
         except Exception as e:
             logging.error(f"[CENTINELA] Error obteniendo reporte de embalses opción 13: {e}")
             send_wa_text(from_jid, "⚠️ No fue posible conectar con el servicio de embalses.")
+
+    elif text == "14" or text.lower().startswith("14 ") or any(k in text.lower() for k in ["alertas", "alerta", "avenidas"]):
+        try:
+            rep_text = get_cfe_alerts_text(crp=detect_crp_from_text(text))
+            send_wa_text(from_jid, rep_text)
+        except Exception as e:
+            logging.error(f"[CENTINELA] Error obteniendo alertas opción 14: {e}")
+            send_wa_text(from_jid, "⚠️ No fue posible consultar las alertas hidráulicas en este momento.")
+
+    elif text == "15" or text.lower().startswith("15 ") or any(k in text.lower() for k in ["boletin", "boletín"]):
+        try:
+            rep_text = get_cfe_daily_bulletin_text(crp=detect_crp_from_text(text), cutoff_hour=6)
+            send_wa_text(from_jid, rep_text)
+        except Exception as e:
+            logging.error(f"[CENTINELA] Error obteniendo boletín opción 15: {e}")
+            send_wa_text(from_jid, "⚠️ No fue posible generar el boletín hidrológico diario.")
+
+    elif text == "16" or text.lower().startswith("16 ") or any(k in text.lower() for k in ["lluvia cuenca", "lluvias cuenca", "corte lluvia"]):
+        try:
+            rep_text = get_cfe_rainfall_by_basin_text(cutoff_hour=6)
+            send_wa_text(from_jid, rep_text)
+        except Exception as e:
+            logging.error(f"[CENTINELA] Error obteniendo lluvia por cuenca opción 16: {e}")
+            send_wa_text(from_jid, "⚠️ No fue posible consultar el corte de lluvia por cuenca.")
+
+    elif text == "17" or text.lower().startswith("17 ") or any(k in text.lower() for k in ["salud red", "red hidrometrica", "red hidrométrica", "estaciones caidas", "estaciones caídas"]):
+        try:
+            rep_text = get_cfe_network_health_text(crp=detect_crp_from_text(text), only_issues=True)
+            send_wa_text(from_jid, rep_text)
+        except Exception as e:
+            logging.error(f"[CENTINELA] Error obteniendo salud de red opción 17: {e}")
+            send_wa_text(from_jid, "⚠️ No fue posible consultar la salud de la red hidrométrica.")
 
     elif text == "6":
         usuarios_en_modo_ia[from_jid] = True
@@ -921,7 +1044,12 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
                     {"title": "8️⃣ [ 8 ]", "value": "Avisos de Ciclones Tropicales SMN"},
                     {"title": "9️⃣ [ 9 ]", "value": "Captura Diaria de Guardia (Embalses/MW)"},
                     {"title": "🔟 [ 11 ]", "value": "Lluvias Acumuladas 24 Horas"},
-                    {"title": "🌧️ [ 12 ]", "value": "Lluvias Parciales del Día"}
+                    {"title": "🌧️ [ 12 ]", "value": "Lluvias Parciales del Día"},
+                    {"title": "🌊 [ 13 ]", "value": "Embalses en Vivo (Cotas, Δ 3h, NAMO y Mm³)"},
+                    {"title": "🚨 [ 14 ]", "value": "Alertas Hidráulicas, Avenidas y QA/QC"},
+                    {"title": "📋 [ 15 ]", "value": "Boletín Hidrológico Diario Integral"},
+                    {"title": "🌧️ [ 16 ]", "value": "Corte de Lluvia 24h por Cuenca (GOES)"},
+                    {"title": "📡 [ 17 ]", "value": "Salud de la Red Hidrométrica (QA/QC)"}
                 ]
             },
             {
@@ -1188,6 +1316,46 @@ def handle_incoming_teams_message(payload, server_base_url="https://cfe-avisos-c
             _build_teams_footer()
         ]
         return _wrap_teams_card(body, [_menu_action()])
+
+    # 11. Embalses en Vivo (Opción 13)
+    if cmd == "13" or cmd.startswith("13 ") or any(k in cmd for k in ["namo", "reporte embalse", "hidrocloud"]):
+        try:
+            txt = get_cfe_embalses_text(crp=detect_crp_from_text(cmd), delta_hours=3)
+        except Exception as e:
+            txt = f"⚠️ Error consultando embalses: {e}"
+        return _wrap_teams_card([_build_teams_header("🌊 Reporte Operativo de Embalses · CFE"), {"type": "TextBlock", "text": txt, "wrap": True, "fontType": "Monospace"}, _build_teams_footer()], [_menu_action()])
+
+    # 12. Alertas Hidráulicas (Opción 14)
+    if cmd == "14" or cmd.startswith("14 ") or any(k in cmd for k in ["alertas", "avenidas"]):
+        try:
+            txt = get_cfe_alerts_text(crp=detect_crp_from_text(cmd))
+        except Exception as e:
+            txt = f"⚠️ Error consultando alertas: {e}"
+        return _wrap_teams_card([_build_teams_header("🚨 Alertas Hidráulicas e Hidrométricas · CFE"), {"type": "TextBlock", "text": txt, "wrap": True, "fontType": "Monospace"}, _build_teams_footer()], [_menu_action()])
+
+    # 13. Boletín Diario (Opción 15)
+    if cmd == "15" or cmd.startswith("15 ") or any(k in cmd for k in ["boletin", "boletín"]):
+        try:
+            txt = get_cfe_daily_bulletin_text(crp=detect_crp_from_text(cmd), cutoff_hour=6)
+        except Exception as e:
+            txt = f"⚠️ Error generando boletín diario: {e}"
+        return _wrap_teams_card([_build_teams_header("📋 Boletín Hidrológico Diario · CFE"), {"type": "TextBlock", "text": txt, "wrap": True, "fontType": "Monospace"}, _build_teams_footer()], [_menu_action()])
+
+    # 14. Lluvia por Cuenca (Opción 16)
+    if cmd == "16" or cmd.startswith("16 ") or any(k in cmd for k in ["lluvia cuenca", "lluvias cuenca", "corte lluvia"]):
+        try:
+            txt = get_cfe_rainfall_by_basin_text(cutoff_hour=6)
+        except Exception as e:
+            txt = f"⚠️ Error consultando lluvia por cuenca: {e}"
+        return _wrap_teams_card([_build_teams_header("🌧️ Corte de Lluvia 24h por Cuenca · CFE"), {"type": "TextBlock", "text": txt, "wrap": True}, _build_teams_footer()], [_menu_action()])
+
+    # 15. Salud de Red Hidrométrica (Opción 17)
+    if cmd == "17" or cmd.startswith("17 ") or any(k in cmd for k in ["salud red", "red hidrometrica", "red hidrométrica"]):
+        try:
+            txt = get_cfe_network_health_text(crp=detect_crp_from_text(cmd), only_issues=True)
+        except Exception as e:
+            txt = f"⚠️ Error consultando salud de red: {e}"
+        return _wrap_teams_card([_build_teams_header("📡 Salud de la Red Hidrométrica · CFE"), {"type": "TextBlock", "text": txt, "wrap": True, "fontType": "Monospace"}, _build_teams_footer()], [_menu_action()])
 
     # 10. Consulta con Inteligencia Artificial (Opción 6 o preguntas abiertas)
     question = clean_text

@@ -11,3 +11,11 @@ services:
         value: 15
       - key: OPENWA_SERVER_URL
         value: http://localhost:8085
+      - key: CFE_MIRROR_API_URL
+        value: https://cfe-mirror-api.onrender.com
+      - key: EMBALSES_AUTO_CRP
+        value: ALL
+      - key: EMBALSES_INTERVAL_HOURS
+        value: 3
+      - key: BOLETIN_DIARIO_AUTO
+        value: "true"

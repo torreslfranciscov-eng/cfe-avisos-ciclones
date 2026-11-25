@@ -1,6 +1,11 @@
+/**
+ * embalses_reporter.js
+ * Cliente oficial de CFE Mirror API (https://cfe-mirror-api.onrender.com)
+ * para Centinela Bot (WhatsApp Baileys) y envíos automáticos cada 3 horas.
+ */
+
 const fs = require('fs');
 const path = require('path');
-const { Pool } = require('pg');
 
 // Cargar variables de entorno desde .env si existe localmente
 const envPath = path.resolve(__dirname, '../.env');
@@ -21,121 +26,201 @@ if (fs.existsSync(envPath)) {
   } catch (e) {}
 }
 
-const pool = new Pool({
-  host: process.env.PG_HOST || 'pg-1ab7e72d-torreslfranciscov-58fb.g.aivencloud.com',
-  port: parseInt(process.env.PG_PORT || '19960', 10),
-  user: process.env.PG_USER || 'avnadmin',
-  password: process.env.PG_PASSWORD,
-  database: process.env.PG_DATABASE || 'defaultdb',
-  ssl: { rejectUnauthorized: false },
-  max: 5,
-  idleTimeoutMillis: 30000
-});
+const MIRROR_API_URL = (process.env.CFE_MIRROR_API_URL || 'https://cfe-mirror-api.onrender.com').replace(/\/+$/, '');
+const MIRROR_API_KEY = (process.env.CFE_MIRROR_API_KEY || 'cfe_live_rWCDtjwhU-nEbp-jlMq0uMV4-AiwrU9lp1jWRw').trim();
 
-async function generateEmbalsesReport(region = 'SURESTE', deltaHours = 3) {
-  const reg = (region || 'SURESTE').trim().toUpperCase();
+const VALID_CRPS = ['SURESTE', 'GOLFO', 'BALSAS', 'SANTIAGO', 'NOROESTE'];
+
+function detectCrpFromText(text) {
+  const low = (text || '').toLowerCase();
+  if (low.includes('sureste') || low.includes('grijalva')) return 'SURESTE';
+  if (low.includes('golfo') || low.includes('papaloapan')) return 'GOLFO';
+  if (low.includes('balsas')) return 'BALSAS';
+  if (low.includes('santiago')) return 'SANTIAGO';
+  if (low.includes('noroeste') || low.includes('pacifico')) return 'NOROESTE';
+  if (low.includes('nacional') || low.includes('todos') || low.includes('todas')) return null;
+  return null;
+}
+
+async function fetchMirrorJson(endpoint, params = {}, timeoutMs = 25000) {
+  const url = new URL(`${MIRROR_API_URL}${endpoint}`);
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && v !== '') {
+      url.searchParams.set(k, String(v));
+    }
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url.toString(), {
+      method: 'GET',
+      headers: {
+        'X-API-Key': MIRROR_API_KEY,
+        'Accept': 'application/json',
+        'User-Agent': 'Centinela-CFE-Bot/2.0'
+      },
+      signal: controller.signal
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`HTTP ${res.status} en ${endpoint}: ${body.slice(0, 180)}`);
+    }
+    return await res.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * 1) Reporte Ejecutivo de Embalses (Δ 3h + NAMO + Volúmenes EAC en Mm³)
+ */
+async function generateEmbalsesReport(region = null, deltaHours = 3) {
+  const crpClean = region ? String(region).trim().toUpperCase() : null;
+  const crpParam = (crpClean && VALID_CRPS.includes(crpClean)) ? crpClean : null;
   const delta = deltaHours > 0 ? deltaHours : 3;
 
-  const damsRes = await pool.query(
-    'SELECT * FROM dbo.embalses_catalogo WHERE activo = true AND UPPER(region) = $1 ORDER BY orden',
-    [reg]
-  );
-
-  const now = new Date();
-  // Hora México Central (CST, UTC-6)
-  const cstDate = new Date(now.getTime() - 6 * 3600 * 1000);
-  const day = String(cstDate.getUTCDate()).padStart(2, '0');
-  const month = String(cstDate.getUTCMonth() + 1).padStart(2, '0');
-  const year = cstDate.getUTCFullYear();
-  const hours = String(cstDate.getUTCHours()).padStart(2, '0');
-  const mins = String(cstDate.getUTCMinutes()).padStart(2, '0');
-
-  let text = 'REPORTE DE EMBALSES · CENTRALES HIDROELÉCTRICAS CFE\n' +
-             `📅 ${day}/${month}/${year}   ⏰ ${hours}:${mins} h\n\n` +
-             `${reg}\n`;
-
-  const presas = [];
-
-  for (const d of damsRes.rows) {
-    const latestQuery = `
-      SELECT ts, valor
-      FROM public.dcp_datos
-      WHERE id_asignado = $1 AND sensor_id = $2 AND valido = true
-      ORDER BY ts DESC LIMIT 1;
-    `;
-    const latRes = await pool.query(latestQuery, [d.id_asignado, d.sensor_id]);
-    if (!latRes.rows.length) continue;
-
-    const lTs = latRes.rows[0].ts;
-    const lVal = parseFloat(latRes.rows[0].valor);
-    if (isNaN(lVal)) continue;
-
-    const prevQuery = `
-      SELECT ts, valor
-      FROM public.dcp_datos
-      WHERE id_asignado = $1 AND sensor_id = $2 AND valido = true
-        AND ts <= ($3::timestamptz - ($4 || ' hour')::interval)
-      ORDER BY ts DESC LIMIT 1;
-    `;
-    const prevRes = await pool.query(prevQuery, [d.id_asignado, d.sensor_id, lTs, delta]);
-    const pVal = prevRes.rows.length ? parseFloat(prevRes.rows[0].valor) : null;
-    const dVal = (pVal !== null && !isNaN(pVal)) ? (lVal - pVal) : 0;
-
-    let trend = '➡️';
-    let deltaSign = '+0.00';
-    if (dVal > 0.005) { trend = '⬆️'; deltaSign = `+${dVal.toFixed(2)}`; }
-    else if (dVal < -0.005) { trend = '⬇️'; deltaSign = dVal.toFixed(2); }
-
-    const isSalida = (d.nombre_corto || '').toLowerCase().includes('salida') ||
-                     (d.nombre_oficial || '').toLowerCase().includes('salida');
-
-    const cotaNamo = parseFloat(d.cota_namo);
-    const deltaNamo = lVal - cotaNamo;
-    const deltaNamoSign = deltaNamo >= 0 ? `+${deltaNamo.toFixed(2)}` : deltaNamo.toFixed(2);
-
-    let semaforo = '🟢';
-    if (!isSalida) {
-      if (deltaNamo >= 0) semaforo = '🔴';
-      else if (deltaNamo >= -1.0) semaforo = '🟡';
-      else semaforo = '🟢';
-    }
-
-    text += `${d.nombre_corto}\n`;
-    text += `${semaforo} ${trend} ${lVal.toFixed(2)} msnm\n`;
-    text += `Δ ${deltaSign} m en ${delta} horas\n`;
-    if (isSalida) {
-      text += `*(Nivel medido a la salida · NAMO presa: ${cotaNamo.toFixed(2)} msnm)*\n\n`;
-    } else {
-      text += `Δ NAMO ${deltaNamoSign} m (${cotaNamo.toFixed(2)} msnm)\n\n`;
-    }
-
-    presas.push({
-      idAsignado: d.id_asignado,
-      nombreCorto: d.nombre_corto,
-      cotaNamo: cotaNamo,
-      cotaName: parseFloat(d.cota_name),
-      nivelActual: lVal,
-      timestampActual: lTs,
-      delta: dVal,
-      deltaHoras: delta,
-      deltaNamo: deltaNamo,
-      trend,
-      semaforo,
-      isSalida
-    });
-  }
+  const data = await fetchMirrorJson('/api/v1/water-levels', {
+    only_dams: 'true',
+    delta_hours: delta,
+    include_text: 'true',
+    ...(crpParam ? { crp: crpParam } : {})
+  });
 
   return {
     titulo: 'REPORTE DE EMBALSES · CENTRALES HIDROELÉCTRICAS CFE',
-    region: reg,
-    mensajeTexto: text.trim(),
-    fechaCorte: now.toISOString(),
-    presas
+    region: crpParam || 'NACIONAL',
+    mensajeTexto: data.resumen_texto || '⚠️ Sin datos de embalses disponibles en este momento.',
+    fechaCorte: `${data.fecha_local || ''} ${data.hora_local || ''}`.trim(),
+    resumenCrp: data.resumen_crp || {},
+    presas: data.data || []
   };
+}
+
+/**
+ * 2) Alertas Hidráulicas e Hidrométricas en Tiempo Real
+ */
+async function getAlertsReport({ severity = null, category = null, crp = null } = {}) {
+  const data = await fetchMirrorJson('/api/v1/alerts', {
+    include_text: 'true',
+    ...(severity ? { severity } : {}),
+    ...(category ? { category } : {}),
+    ...(crp ? { crp } : {})
+  });
+  return {
+    total: data.total_alertas || 0,
+    porSeveridad: data.por_severidad || {},
+    porCategoria: data.por_categoria || {},
+    alertas: data.alertas || [],
+    mensajeTexto: data.resumen_texto || '🟢 Sin alertas activas en este momento.'
+  };
+}
+
+/**
+ * 3) Salud de la Red Hidrométrica (QA/QC)
+ */
+async function getNetworkHealthReport({ onlyIssues = true, onlyDams = false, crp = null } = {}) {
+  const data = await fetchMirrorJson('/api/v1/network-health', {
+    only_issues: onlyIssues ? 'true' : 'false',
+    only_dams: onlyDams ? 'true' : 'false',
+    include_text: 'true',
+    ...(crp ? { crp } : {})
+  });
+  return {
+    resumenNacional: data.resumen_nacional || {},
+    mensajeTexto: data.resumen_texto || '⚠️ No se pudo consultar la salud de la red.'
+  };
+}
+
+/**
+ * 4) Boletín Hidrológico Diario Integral (Corte 06:00)
+ */
+async function getDailyBulletinReport({ crp = null, cutoffHour = 6 } = {}) {
+  const data = await fetchMirrorJson('/api/v1/daily-bulletin', {
+    cutoff_hour: cutoffHour,
+    include_text: 'true',
+    ...(crp ? { crp } : {})
+  });
+  return {
+    balanceNacional: data.balance_nacional || {},
+    mensajeTexto: data.resumen_texto || '⚠️ No se pudo generar el boletín diario.'
+  };
+}
+
+/**
+ * 5) Corte de Lluvia 24h por Cuenca (06:01 -> 06:00 local)
+ */
+async function getRainfallByBasinReport({ cutoffHour = 6, onlyWithRain = false } = {}) {
+  const data = await fetchMirrorJson('/api/v1/rainfall-cut/by-basin', {
+    cutoff_hour: cutoffHour,
+    only_with_rain: onlyWithRain ? 'true' : 'false'
+  });
+
+  const basins = data.data || [];
+  const rainy = basins.filter(b => (b.lamina_max_24h_mm || 0) > 0);
+  const lines = [
+    'CORTE DE LLUVIA POR CUENCA · CFE',
+    `📅 Corte: ${data.cutoff_date_local || ''} (${String(cutoffHour).padStart(2, '0')}:00 h)`,
+    `🕒 Ventana: ${data.window_local || ''}`,
+    `🌧️ Cuencas con lluvia: ${data.basins_with_rain || 0} de ${data.basins_count || basins.length}`,
+    ''
+  ];
+
+  if (rainy.length === 0) {
+    lines.push('☀️ Sin precipitaciones registradas en las cuencas CFE durante el corte de 24 horas.');
+  } else {
+    for (const b of rainy.slice(0, 15)) {
+      lines.push(
+        `🌧️ *${b.cuenca}*: media ${Number(b.lamina_media_24h_mm).toFixed(1)} mm · máx ${Number(b.lamina_max_24h_mm).toFixed(1)} mm (${b.estacion_max_nombre || 'N/D'}) [${b.estaciones_con_lluvia}/${b.estaciones_con_datos} est.]`
+      );
+    }
+  }
+
+  return {
+    basinsCount: data.basins_count || 0,
+    basinsWithRain: data.basins_with_rain || 0,
+    data: basins,
+    mensajeTexto: lines.join('\n').trim()
+  };
+}
+
+/**
+ * Combina el reporte de embalses cada 3h con un bloque compacto de alertas críticas/preventivas activas (EMBALSES/AVENIDAS).
+ */
+async function buildScheduled3hMessage(crp = null) {
+  const rep = await generateEmbalsesReport(crp, 3);
+  let msg = rep.mensajeTexto;
+
+  try {
+    const al = await getAlertsReport({
+      severity: 'CRITICA,ALERTA',
+      category: 'EMBALSES,AVENIDAS',
+      crp
+    });
+    if (al && al.total > 0) {
+      const top = al.alertas.slice(0, 6);
+      const aLines = ['', `🚨 *ALERTAS ACTIVAS (${al.total})*`];
+      for (const a of top) {
+        const ico = a.severidad === 'CRITICA' ? '🔴' : '🟡';
+        aLines.push(`${ico} [${a.crp}] ${a.titulo}`);
+        aLines.push(`   ${a.detalle}`);
+      }
+      msg = `${msg}\n${aLines.join('\n')}`;
+    }
+  } catch (e) {
+    console.warn('[EMBALSES-REPORTER] No se pudieron anexar alertas al reporte 3h:', e.message);
+  }
+
+  return { ...rep, mensajeTexto: msg };
 }
 
 module.exports = {
   generateEmbalsesReport,
-  pool
+  getAlertsReport,
+  getNetworkHealthReport,
+  getDailyBulletinReport,
+  getRainfallByBasinReport,
+  buildScheduled3hMessage,
+  detectCrpFromText,
+  MIRROR_API_URL
 };
-

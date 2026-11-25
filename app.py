@@ -876,6 +876,17 @@ def proxy_status():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+@app.route("/api/embalses/dispatch-now")
+def proxy_embalses_dispatch_now():
+    """Proxy para disparar manualmente el envío por WhatsApp de embalses (3h) o boletín diario."""
+    openwa_url = os.getenv("OPENWA_SERVER_URL", "http://localhost:8085").rstrip("/")
+    try:
+        r = http_requests.get(f"{openwa_url}/api/embalses/dispatch-now", params=request.args, timeout=35)
+        return Response(r.content, status=r.status_code, content_type="application/json")
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @app.route("/qr/data")
 @app.route("/qr/data/")
 @app.route("/qr-data")

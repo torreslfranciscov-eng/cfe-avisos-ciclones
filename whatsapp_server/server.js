@@ -14,7 +14,15 @@ const {
     fetchLatestBaileysVersion,
     Browsers
 } = require('@whiskeysockets/baileys');
-const { generateEmbalsesReport } = require('./embalses_reporter');
+const {
+    generateEmbalsesReport,
+    getAlertsReport,
+    getNetworkHealthReport,
+    getDailyBulletinReport,
+    getRainfallByBasinReport,
+    buildScheduled3hMessage,
+    detectCrpFromText
+} = require('./embalses_reporter');
 
 const app = express();
 app.use(cors());
@@ -101,9 +109,13 @@ function getMenuText() {
         "8️⃣ 🌀 Avisos de Ciclón Tropical (SMN / CONAGUA)\n" +
         "11️⃣ Reporte de lluvias 24h (6am a 6am)\n" +
         "12️⃣ Reporte de lluvias parcial\n" +
-        "13️⃣ 🌊 Reporte Operativo de Embalses (Cotas, Δ y NAMO)\n" +
+        "13️⃣ 🌊 Reporte Operativo de Embalses (Cotas, Δ 3h, NAMO y Mm³)\n" +
+        "14️⃣ 🚨 Alertas Hidráulicas, Avenidas y QA/QC en Tiempo Real\n" +
+        "15️⃣ 📋 Boletín Hidrológico Diario Integral (Balance Nacional)\n" +
+        "16️⃣ 🌧️ Corte de Lluvia 24h por Cuenca (GOES en vivo)\n" +
+        "17️⃣ 📡 Salud de la Red Hidrométrica (QA/QC)\n" +
         "6️⃣ 🤖 Consultar con IA\n\n" +
-        "💡 *Tip:* En modo IA, escribe 'volver' para regresar aquí."
+        "💡 *Tip:* Puedes pedir por región (ej. `13 sureste`, `13 balsas`, `14 sureste`). En modo IA escribe 'volver'."
     );
 }
 
@@ -459,7 +471,9 @@ app.post('/sendCycloneNotice', async (req, res) => {
 // Función central para procesar el menú de Centinela directamente en Node.js
 async function procesarMensajeCentinela(fromJid, text, msgId) {
     if (!fromJid || !text) return;
-    const body = text.trim();
+    const rawBody = text.trim();
+    // Limpiar prefijos de grupo (#, !, "centinela ") para que funcionen comandos en grupo y privado
+    const body = rawBody.replace(/^(?:[#!]+\s*|centinela\b[\s,:]*)/i, '').trim() || rawBody;
     const cleanCmd = body.toLowerCase();
 
     // Anti-duplicados (10 segundos)
@@ -572,9 +586,10 @@ async function procesarMensajeCentinela(fromJid, text, msgId) {
         const buf = await downloadAzureBlob(AZURE_CONTAINER, 'reporte_lluvia_1_2_638848218556433423.png');
         if (buf) await sendImg(buf, '📊 *CFE SPH Grijalva - Reporte de lluvias parcial de 6am a hora actual.*', 'lluvias_parcial.png');
         else await sendMsg('⚠️ No se pudo obtener el reporte de lluvias parcial.');
-    } else if (body === '13' || cleanCmd.includes('cotas') || cleanCmd.includes('namo') || cleanCmd.includes('reporte embalse') || cleanCmd.includes('hidrocloud')) {
+    } else if (body === '13' || cleanCmd.startsWith('13 ') || cleanCmd.includes('cotas') || cleanCmd.includes('namo') || cleanCmd.includes('reporte embalse') || cleanCmd.includes('embalses ') || cleanCmd === 'embalses' || cleanCmd.includes('hidrocloud')) {
         try {
-            const rep = await generateEmbalsesReport('SURESTE', 3);
+            const targetCrp = detectCrpFromText(cleanCmd);
+            const rep = await generateEmbalsesReport(targetCrp, 3);
             if (rep && rep.mensajeTexto) {
                 await sendMsg(rep.mensajeTexto);
                 return;
@@ -582,6 +597,53 @@ async function procesarMensajeCentinela(fromJid, text, msgId) {
         } catch (e) {
             console.error('[CENTINELA] Error generando reporte de embalses opción 13:', e.message);
             await sendMsg('⚠️ No fue posible consultar el reporte de embalses en este momento.');
+        }
+    } else if (body === '14' || cleanCmd.startsWith('14 ') || cleanCmd === 'alertas' || cleanCmd.startsWith('alertas ') || cleanCmd.includes('alerta') || cleanCmd.includes('avenidas')) {
+        try {
+            const targetCrp = detectCrpFromText(cleanCmd);
+            const rep = await getAlertsReport({ crp: targetCrp });
+            if (rep && rep.mensajeTexto) {
+                await sendMsg(rep.mensajeTexto);
+                return;
+            }
+        } catch (e) {
+            console.error('[CENTINELA] Error consultando alertas opción 14:', e.message);
+            await sendMsg('⚠️ No fue posible consultar las alertas hidráulicas en este momento.');
+        }
+    } else if (body === '15' || cleanCmd.startsWith('15 ') || cleanCmd.includes('boletin') || cleanCmd.includes('boletín')) {
+        try {
+            const targetCrp = detectCrpFromText(cleanCmd);
+            const rep = await getDailyBulletinReport({ crp: targetCrp, cutoffHour: 6 });
+            if (rep && rep.mensajeTexto) {
+                await sendMsg(rep.mensajeTexto);
+                return;
+            }
+        } catch (e) {
+            console.error('[CENTINELA] Error generando boletín diario opción 15:', e.message);
+            await sendMsg('⚠️ No fue posible generar el boletín hidrológico diario en este momento.');
+        }
+    } else if (body === '16' || cleanCmd.startsWith('16 ') || cleanCmd.includes('lluvia cuenca') || cleanCmd.includes('lluvias cuenca') || cleanCmd.includes('corte lluvia')) {
+        try {
+            const rep = await getRainfallByBasinReport({ cutoffHour: 6 });
+            if (rep && rep.mensajeTexto) {
+                await sendMsg(rep.mensajeTexto);
+                return;
+            }
+        } catch (e) {
+            console.error('[CENTINELA] Error generando corte de lluvia por cuenca opción 16:', e.message);
+            await sendMsg('⚠️ No fue posible consultar el corte de lluvia por cuenca en este momento.');
+        }
+    } else if (body === '17' || cleanCmd.startsWith('17 ') || cleanCmd.includes('salud red') || cleanCmd.includes('red hidrometrica') || cleanCmd.includes('red hidrométrica') || cleanCmd.includes('estaciones caidas') || cleanCmd.includes('estaciones caídas') || cleanCmd === 'qa') {
+        try {
+            const targetCrp = detectCrpFromText(cleanCmd);
+            const rep = await getNetworkHealthReport({ onlyIssues: true, crp: targetCrp });
+            if (rep && rep.mensajeTexto) {
+                await sendMsg(rep.mensajeTexto);
+                return;
+            }
+        } catch (e) {
+            console.error('[CENTINELA] Error consultando salud de red opción 17:', e.message);
+            await sendMsg('⚠️ No fue posible consultar la salud de la red hidrométrica en este momento.');
         }
     } else if (body === '7') {
         const buf = await downloadAzureBlob('reporte-unidades', 'telegram_report.txt');
@@ -663,41 +725,138 @@ app.get('/status', (req, res) => {
 });
 
 // ==========================================
-// DESPACHO AUTOMÁTICO DE EMBALSES (CADA 3 HORAS)
+// DESPACHO AUTOMÁTICO DE EMBALSES (CADA 3 HORAS EN RELOJ CST + BOLETÍN 06:30)
 // ==========================================
-const GRUPO_AVISOS_CICLONES_JID = process.env.EMBALSES_GRUPO_JID || '120363412138898868@g.us';
-const INTERVALO_EMBALSES_MS = 3 * 60 * 60 * 1000; // 3 horas
+const GRUPO_AVISOS_CICLONES_RAW = process.env.EMBALSES_GRUPO_JID || '120363412138898868@g.us';
+const EMBALSES_AUTO_CRP = (process.env.EMBALSES_AUTO_CRP || 'ALL').trim().toUpperCase();
+const EMBALSES_INTERVAL_HOURS = Math.max(1, parseInt(process.env.EMBALSES_INTERVAL_HOURS || '3', 10));
+const BOLETIN_DIARIO_AUTO = (process.env.BOLETIN_DIARIO_AUTO || 'true').toLowerCase() !== 'false';
 let temporizadorEmbalses = null;
+let lastDispatched3hSlot = null;
+let lastDispatchedDailyDate = null;
 
-async function despacharReporteAutomaticoEmbalses() {
+function getEmbalsesRecipients() {
+    return GRUPO_AVISOS_CICLONES_RAW.split(',').map(x => x.trim()).filter(Boolean);
+}
+
+async function enviarTextoAGruposEmbalses(texto, tag = 'CRON-EMBALSES') {
     if (!waSock || clientStatus !== 'READY') {
-        console.log('[CRON-EMBALSES] WhatsApp no está listo, se omitirá este ciclo.');
-        return;
+        console.log(`[${tag}] WhatsApp no está listo, se omitirá este envío.`);
+        return { ok: false, sent: 0, reason: 'WHATSAPP_NOT_READY' };
     }
-    try {
-        console.log(`[CRON-EMBALSES] Generando reporte automático para grupo Avisos Ciclones (${GRUPO_AVISOS_CICLONES_JID})...`);
-        const rep = await generateEmbalsesReport('SURESTE', 3);
-        if (rep && rep.mensajeTexto) {
-            const prefix = rep.mensajeTexto.slice(0, 40);
-            recentSentTexts.add(prefix);
-            setTimeout(() => recentSentTexts.delete(prefix), 60000);
+    const recipients = getEmbalsesRecipients();
+    if (!recipients.length) {
+        return { ok: false, sent: 0, reason: 'NO_RECIPIENTS' };
+    }
+    const prefix = texto.slice(0, 40);
+    recentSentTexts.add(prefix);
+    setTimeout(() => recentSentTexts.delete(prefix), 60000);
 
-            const result = await waSock.sendMessage(GRUPO_AVISOS_CICLONES_JID, { text: rep.mensajeTexto });
+    let sent = 0;
+    for (const jid of recipients) {
+        try {
+            const result = await waSock.sendMessage(jid, { text: texto });
             if (result?.key?.id) {
                 botSentMessageIds.add(result.key.id);
             }
-            console.log(`✅ [CRON-EMBALSES] Reporte de embalses enviado con éxito al grupo Avisos Ciclones a las ${new Date().toLocaleTimeString('es-MX')}`);
+            sent += 1;
+            console.log(`✅ [${tag}] Enviado con éxito a ${jid} (${new Date().toLocaleTimeString('es-MX')})`);
+        } catch (err) {
+            console.error(`❌ [${tag}] Error enviando a ${jid}:`, err.message);
         }
+    }
+    return { ok: sent > 0, sent, recipients };
+}
+
+async function despacharReporteAutomaticoEmbalses(forceCrp = null) {
+    try {
+        const crpUse = forceCrp !== null ? forceCrp : (EMBALSES_AUTO_CRP === 'ALL' ? null : EMBALSES_AUTO_CRP);
+        console.log(`[CRON-EMBALSES] Generando reporte automático 3h (CRP: ${crpUse || 'NACIONAL'})...`);
+        const rep = await buildScheduled3hMessage(crpUse);
+        if (rep && rep.mensajeTexto) {
+            return await enviarTextoAGruposEmbalses(rep.mensajeTexto, 'CRON-EMBALSES-3H');
+        }
+        return { ok: false, sent: 0, reason: 'EMPTY_REPORT' };
     } catch (err) {
-        console.error('❌ [CRON-EMBALSES] Error enviando reporte automático:', err.message);
+        console.error('❌ [CRON-EMBALSES] Error generando/enviando reporte automático:', err.message);
+        return { ok: false, sent: 0, error: err.message };
+    }
+}
+
+async function despacharBoletinDiarioAutomatico() {
+    try {
+        const crpUse = EMBALSES_AUTO_CRP === 'ALL' ? null : EMBALSES_AUTO_CRP;
+        console.log(`[CRON-BOLETIN] Generando Boletín Hidrológico Diario 06:30 h (CRP: ${crpUse || 'NACIONAL'})...`);
+        const rep = await getDailyBulletinReport({ crp: crpUse, cutoffHour: 6 });
+        if (rep && rep.mensajeTexto) {
+            return await enviarTextoAGruposEmbalses(rep.mensajeTexto, 'CRON-BOLETIN-DIARIO');
+        }
+        return { ok: false, sent: 0, reason: 'EMPTY_BULLETIN' };
+    } catch (err) {
+        console.error('❌ [CRON-BOLETIN] Error enviando boletín diario:', err.message);
+        return { ok: false, sent: 0, error: err.message };
+    }
+}
+
+function tickCronHidrometrico() {
+    if (!waSock || clientStatus !== 'READY') return;
+    // Hora local Centro México (CST, UTC-6)
+    const cst = new Date(Date.now() - 6 * 3600 * 1000);
+    const y = cst.getUTCFullYear();
+    const m = String(cst.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(cst.getUTCDate()).padStart(2, '0');
+    const hh = cst.getUTCHours();
+    const mm = cst.getUTCMinutes();
+    const dateKey = `${y}-${m}-${d}`;
+
+    // 1) Reporte de embalses + alertas cada 3 horas exactas CST (00:00, 03:00, 06:00, 09:00, 12:00, 15:00, 18:00, 21:00)
+    if (hh % EMBALSES_INTERVAL_HOURS === 0 && mm <= 4) {
+        const slotKey = `${dateKey}_${String(hh).padStart(2, '0')}`;
+        if (lastDispatched3hSlot !== slotKey) {
+            lastDispatched3hSlot = slotKey;
+            despacharReporteAutomaticoEmbalses();
+        }
+    }
+
+    // 2) Boletín Hidrológico Diario Integral a las 06:30 CST (corte 06:00 de lluvia 24h + balance nacional)
+    if (BOLETIN_DIARIO_AUTO && hh === 6 && mm >= 30 && mm <= 34) {
+        if (lastDispatchedDailyDate !== dateKey) {
+            lastDispatchedDailyDate = dateKey;
+            despacharBoletinDiarioAutomatico();
+        }
     }
 }
 
 function iniciarCronEmbalses() {
     if (temporizadorEmbalses) clearInterval(temporizadorEmbalses);
-    temporizadorEmbalses = setInterval(despacharReporteAutomaticoEmbalses, INTERVALO_EMBALSES_MS);
-    console.log(`⏰ [CRON-EMBALSES] Programador activo: Reportes automáticos cada 3 horas a ${GRUPO_AVISOS_CICLONES_JID}`);
+    temporizadorEmbalses = setInterval(tickCronHidrometrico, 60 * 1000);
+    console.log(`⏰ [CRON-EMBALSES] Programador activo: cada ${EMBALSES_INTERVAL_HOURS}h exactas CST (CRP=${EMBALSES_AUTO_CRP}) + Boletín 06:30 CST=${BOLETIN_DIARIO_AUTO} -> ${GRUPO_AVISOS_CICLONES_RAW}`);
 }
+
+// Endpoints HTTP internos para consulta y disparo manual de reportes
+app.get('/api/embalses/reporte', async (req, res) => {
+    try {
+        const region = req.query.region || req.query.crp || null;
+        const deltaHours = parseInt(req.query.deltaHours || '3', 10);
+        const report = await generateEmbalsesReport(region, deltaHours);
+        res.json({ ok: true, report });
+    } catch (e) {
+        res.status(500).json({ ok: false, error: e.message });
+    }
+});
+
+app.get('/api/embalses/dispatch-now', async (req, res) => {
+    try {
+        const mode = (req.query.mode || '3h').toLowerCase();
+        const crp = req.query.crp ? String(req.query.crp).toUpperCase() : null;
+        const result = mode === 'daily'
+            ? await despacharBoletinDiarioAutomatico()
+            : await despacharReporteAutomaticoEmbalses(crp);
+        res.json({ ok: result.ok, mode, result });
+    } catch (e) {
+        res.status(500).json({ ok: false, error: e.message });
+    }
+});
 
 let isStarting = false;
 
@@ -782,10 +941,13 @@ async function startBaileys() {
                 console.log('[WA MSG RECV]', { from, text: trimmed.slice(0, 60), fromMe: msg.key.fromMe, id: msg.key.id });
 
                 // 4.1. Filtro estricto anti-eco de HydroCloud y reportes salientes
-                if (trimmed.includes('REPORTE DE EMBALSES') || 
-                    trimmed.includes('HydroCloud') || 
+                if (trimmed.includes('REPORTE DE EMBALSES') ||
+                    trimmed.includes('ALERTAS HIDRÁULICAS') ||
+                    trimmed.includes('SALUD DE LA RED HIDROMÉTRICA') ||
+                    trimmed.includes('BOLETÍN HIDROLÓGICO DIARIO') ||
+                    trimmed.includes('CORTE DE LLUVIA POR CUENCA') ||
+                    trimmed.includes('HydroCloud') ||
                     trimmed.includes('CENTRALES HIDROELÉCTRICAS') ||
-                    trimmed.includes('NAMO') ||
                     recentSentTexts.has(trimmed.slice(0, 40))) {
                     continue;
                 }

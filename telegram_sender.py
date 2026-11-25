@@ -296,7 +296,11 @@ def handle_incoming_telegram_update(payload, server_base_url="https://cfe-avisos
     Procesa mensajes entrantes del bot de Telegram para Centinela SPH Grijalva (@wgrijalva_bot).
     Mantiene aislamiento absoluto: si recibe botones o comandos de Bitso, los redirige a @mibitso_bot.
     """
-    from centinela_bot import get_azure_blob_bytes, get_azure_blob_text, ask_deepseek, get_cyclones_summary, AZURE_CONTAINER
+    from centinela_bot import (
+        get_azure_blob_bytes, get_azure_blob_text, ask_deepseek, get_cyclones_summary, AZURE_CONTAINER,
+        detect_crp_from_text, get_cfe_embalses_text, get_cfe_alerts_text,
+        get_cfe_daily_bulletin_text, get_cfe_rainfall_by_basin_text, get_cfe_network_health_text,
+    )
 
     # 0. Interceptar toques de botones (callback_query)
     cb = payload.get("callback_query")
@@ -366,6 +370,11 @@ def handle_incoming_telegram_update(payload, server_base_url="https://cfe-avisos
         f"8️⃣ <b>8</b> - 🌀 <b>Avisos de Ciclón Tropical (SMN / CONAGUA)</b>\n"
         f"11️⃣ <b>11</b> - Reporte de Lluvias 24h (6am a 6am)\n"
         f"12️⃣ <b>12</b> - Reporte de Lluvias Parcial\n"
+        f"13️⃣ <b>13</b> - 🌊 Embalses en Vivo (Cotas, Δ 3h, NAMO y Mm³)\n"
+        f"14️⃣ <b>14</b> - 🚨 Alertas Hidráulicas, Avenidas y QA/QC\n"
+        f"15️⃣ <b>15</b> - 📋 Boletín Hidrológico Diario Integral\n"
+        f"16️⃣ <b>16</b> - 🌧️ Corte de Lluvia 24h por Cuenca (GOES)\n"
+        f"17️⃣ <b>17</b> - 📡 Salud de la Red Hidrométrica (QA/QC)\n"
         f"6️⃣ <b>6</b> o pregunta directa - 🤖 Consulta Técnica con IA\n\n"
         f"💡 <i>Escribe el número de la opción o envía tu pregunta técnica.</i>"
     )
@@ -471,6 +480,51 @@ def handle_incoming_telegram_update(payload, server_base_url="https://cfe-avisos
             send_telegram_photo(chat_id, img, "🌧️ <b>Reporte de Lluvias Parcial (6am a hora actual)</b> — CFE SPH Grijalva")
         else:
             send_telegram_text(chat_id, "⚠️ No se pudo obtener el reporte de lluvias parcial.")
+
+    # 11. Embalses en vivo (Opción 13)
+    elif cmd == "13" or cmd.startswith("13 ") or cmd.startswith("/embalses") or any(k in cmd for k in ["cotas", "namo", "reporte embalse"]):
+        try:
+            txt = get_cfe_embalses_text(crp=detect_crp_from_text(cmd), delta_hours=3)
+            send_telegram_text(chat_id, f"<pre>{txt[:3900]}</pre>")
+        except Exception as e:
+            logging.error(f"[TELEGRAM] Error opción 13: {e}")
+            send_telegram_text(chat_id, "⚠️ No fue posible consultar el reporte de embalses en este momento.")
+
+    # 12. Alertas Hidráulicas e Hidrométricas (Opción 14)
+    elif cmd == "14" or cmd.startswith("14 ") or cmd.startswith("/alertas") or any(k in cmd for k in ["alertas", "avenidas"]):
+        try:
+            txt = get_cfe_alerts_text(crp=detect_crp_from_text(cmd))
+            send_telegram_text(chat_id, f"<pre>{txt[:3900]}</pre>")
+        except Exception as e:
+            logging.error(f"[TELEGRAM] Error opción 14: {e}")
+            send_telegram_text(chat_id, "⚠️ No fue posible consultar las alertas hidráulicas.")
+
+    # 13. Boletín Diario Integral (Opción 15)
+    elif cmd == "15" or cmd.startswith("15 ") or cmd.startswith("/boletin") or any(k in cmd for k in ["boletin", "boletín"]):
+        try:
+            txt = get_cfe_daily_bulletin_text(crp=detect_crp_from_text(cmd), cutoff_hour=6)
+            send_telegram_text(chat_id, f"<pre>{txt[:3900]}</pre>")
+        except Exception as e:
+            logging.error(f"[TELEGRAM] Error opción 15: {e}")
+            send_telegram_text(chat_id, "⚠️ No fue posible generar el boletín hidrológico diario.")
+
+    # 14. Corte de Lluvia por Cuenca (Opción 16)
+    elif cmd == "16" or cmd.startswith("16 ") or cmd.startswith("/lluviacuencas") or any(k in cmd for k in ["lluvia cuenca", "lluvias cuenca", "corte lluvia"]):
+        try:
+            txt = get_cfe_rainfall_by_basin_text(cutoff_hour=6)
+            send_telegram_text(chat_id, f"<pre>{txt[:3900]}</pre>")
+        except Exception as e:
+            logging.error(f"[TELEGRAM] Error opción 16: {e}")
+            send_telegram_text(chat_id, "⚠️ No fue posible consultar el corte de lluvia por cuenca.")
+
+    # 15. Salud de Red Hidrométrica (Opción 17)
+    elif cmd == "17" or cmd.startswith("17 ") or cmd.startswith("/saludred") or any(k in cmd for k in ["salud red", "red hidrometrica", "red hidrométrica"]):
+        try:
+            txt = get_cfe_network_health_text(crp=detect_crp_from_text(cmd), only_issues=True)
+            send_telegram_text(chat_id, f"<pre>{txt[:3900]}</pre>")
+        except Exception as e:
+            logging.error(f"[TELEGRAM] Error opción 17: {e}")
+            send_telegram_text(chat_id, "⚠️ No fue posible consultar la salud de la red hidrométrica.")
 
     # 11. Consulta de Inteligencia Artificial
     else:
