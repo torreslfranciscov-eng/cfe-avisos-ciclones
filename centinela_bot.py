@@ -358,38 +358,73 @@ def is_volver(msg):
     return msg.strip().lower() in ["volver", "menu", "menú", "inicio", "salir", "0"]
 
 
-def ask_deepseek(question):
-    """Consulta técnica especializada con DeepSeek / OpenAI."""
-    api_key = DEEPSEEK_API_KEY or os.getenv("OPENAI_API_KEY", "")
-    if not api_key:
-        return "⚠️ El motor de IA no tiene clave configurada en las variables de entorno."
-    try:
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
-        prompt = f"""
-Actúa como un ingeniero hidroeléctrico experto del sistema de presas del río Grijalva (Angostura, Chicoasén, Malpaso, Peñitas) de CFE.
-Pregunta del usuario: {question}
+_ai_context_cache = {"text": "", "ts": 0.0}
 
-Responde de forma técnica, clara y concisa (máximo 3 párrafos).
-Usa unidades correctas: msnm, m³/s, hm³, MW.
-Finaliza firmando como: *Centinela SPH Grijalva*.
-"""
-        payload = {
-            "model": "deepseek-chat",
-            "messages": [
-                {"role": "system", "content": "Eres el Centinela SPH Grijalva, experto en operación hidroeléctrica de CFE."},
-                {"role": "user", "content": prompt}
-            ]
-        }
-        res = requests.post("https://api.deepseek.com/v1/chat/completions", json=payload, headers=headers, timeout=30)
-        if res.status_code == 200:
-            return res.json()["choices"][0]["message"]["content"]
-        else:
-            return "⚠️ No fue posible conectar con el motor de IA en este momento."
-    except Exception as e:
-        return f"❌ Error al consultar con IA: {e}"
+
+def _get_live_cfe_ai_context():
+    now = time.time()
+    if _ai_context_cache["text"] and (now - _ai_context_cache["ts"]) < 300:
+        return _ai_context_cache["text"]
+    parts = []
+    for label, fn in [
+        ("ESTADO ACTUAL DE EMBALSES CFE", lambda: get_cfe_embalses_text(None, 3)),
+        ("ALERTAS ACTIVAS (CRÍTICAS Y PREVENTIVAS)", lambda: get_cfe_alerts_text(None, "CRITICA,ALERTA", None)),
+        ("CORTE DE LLUVIA 24H POR CUENCA", lambda: get_cfe_rainfall_by_basin_text(6)),
+        ("SALUD DE LA RED HIDROMÉTRICA", lambda: get_cfe_network_health_text(None, True)[:1400]),
+    ]:
+        try:
+            txt = fn()
+            if txt:
+                parts.append(f"=== {label} ===\n{txt}")
+        except Exception:
+            pass
+    combined = "\n\n".join(parts) or "Sin telemetría disponible en este momento."
+    _ai_context_cache["text"] = combined
+    _ai_context_cache["ts"] = now
+    return combined
+
+
+def ask_deepseek(question):
+    """Consulta técnica especializada con Google Gemini conectado en tiempo real a la red CFE."""
+    gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not gemini_key:
+        return "⚠️ El motor de IA Gemini no tiene configurada la variable de entorno GEMINI_API_KEY."
+
+    live_ctx = _get_live_cfe_ai_context()
+    system_prompt = (
+        "Eres Centinela IA, experto en Ingeniería Hidráulica, Hidrometría y Operación Hidroeléctrica de CFE. "
+        "Usa SIEMPRE la telemetría en vivo proporcionada para responder sobre presas, niveles, volúmenes (Mm³), "
+        "lluvias 24h, alertas y salud de la red. Nunca inventes cifras. "
+        "Responde en español técnico claro y conciso (máximo 3 párrafos) usando msnm, Mm³, m³/s, mm, %. "
+        "Firma como: *Centinela IA · CFE Hidrometría*.\n\n"
+        f"=== TELEMETRÍA EN VIVO DE LA RED CFE ===\n{live_ctx}"
+    )
+
+    custom_model = os.getenv("GEMINI_MODEL", "").strip()
+    models = [m for m in [custom_model, "gemini-3.5-flash-lite", "gemini-flash-lite-latest", "gemini-flash-latest", "gemini-3.8-flash"] if m]
+    payload = {
+        "system_instruction": {"parts": [{"text": system_prompt}]},
+        "contents": [{"role": "user", "parts": [{"text": question}]}],
+        "generationConfig": {"temperature": 0.3, "maxOutputTokens": 700},
+    }
+
+    last_err = None
+    for model_name in models:
+        clean_m = model_name.replace("models/", "")
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{clean_m}:generateContent?key={gemini_key}"
+        try:
+            res = requests.post(url, json=payload, timeout=25)
+            if res.status_code == 200:
+                data = res.json()
+                parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+                ans = "".join(p.get("text", "") for p in parts).strip()
+                if ans:
+                    return ans
+            last_err = f"HTTP {res.status_code}: {res.text[:150]}"
+        except Exception as e:
+            last_err = str(e)
+    logging.error(f"[CENTINELA-AI] Todos los modelos Gemini fallaron: {last_err}")
+    return "⚠️ El servicio de IA Gemini está temporalmente saturado. Intenta de nuevo en unos segundos."
 
 
 def process_with_ai(from_jid, question):

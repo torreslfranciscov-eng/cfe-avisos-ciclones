@@ -23,6 +23,7 @@ const {
     buildScheduled3hMessage,
     detectCrpFromText
 } = require('./embalses_reporter');
+const { askCentinelaAI, clearUserHistory } = require('./ai_assistant');
 
 const app = express();
 app.use(cors());
@@ -508,50 +509,19 @@ async function procesarMensajeCentinela(fromJid, text, msgId) {
     // Comando volver
     if (['volver', 'menu', 'menú', 'inicio', 'salir', '0'].includes(cleanCmd)) {
         usuariosEnModoIA.delete(fromJid);
+        clearUserHistory(fromJid);
         await sendMsg("✅ *Has vuelto al menú principal*\n\n" + getMenuText());
         return;
     }
 
-    // Modo IA
+    // Modo IA (Google Gemini con telemetría en vivo de la red CFE)
     if (usuariosEnModoIA.has(fromJid)) {
-        await sendMsg("🤖 *Analizando tu consulta técnica...*\nEsto puede tardar unos segundos.");
+        await sendMsg("🤖 *Consultando telemetría CFE y analizando con Gemini IA...*");
         try {
-            const prompt = `Actúa como un ingeniero hidroeléctrico experto del sistema de presas del río Grijalva (Angostura, Chicoasén, Malpaso, Peñitas) de CFE.\nPregunta: ${body}\nResponde de forma técnica y concisa (máx 3 párrafos). Firma como: Centinela SPH Grijalva.`;
-            const payload = JSON.stringify({
-                model: 'deepseek-chat',
-                messages: [
-                    { role: 'system', content: 'Eres el Centinela SPH Grijalva, experto en operación hidroeléctrica de CFE.' },
-                    { role: 'user', content: prompt }
-                ]
-            });
-            const options = {
-                hostname: 'api.deepseek.com',
-                path: '/v1/chat/completions',
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': 'Bearer sk-986d321f4933437da0100bf58b054434'
-                }
-            };
-            const req = https.request(options, (res) => {
-                let data = '';
-                res.on('data', d => data += d);
-                res.on('end', async () => {
-                    try {
-                        const json = JSON.parse(data);
-                        const ans = json.choices[0].message.content;
-                        await sendMsg(`🤖 *Análisis Técnico Centinela:*\n\n${ans}\n\n💡 _Escribe 'volver' para regresar al menú principal._`);
-                    } catch (e) {
-                        await sendMsg("⚠️ No fue posible conectar con el motor de IA en este momento.\nEscribe 'volver' para regresar al menú.");
-                    }
-                });
-            });
-            req.on('error', async () => {
-                await sendMsg("⚠️ No fue posible conectar con el motor de IA en este momento.\nEscribe 'volver' para regresar al menú.");
-            });
-            req.write(payload);
-            req.end();
+            const ans = await askCentinelaAI(fromJid, body);
+            await sendMsg(`🤖 *Centinela IA · Red CFE:*\n\n${ans}\n\n💡 _Escribe otra pregunta o 'volver' para regresar al menú._`);
         } catch (e) {
+            console.error('[CENTINELA-AI] Error:', e.message);
             await sendMsg("❌ Ocurrió un error al procesar tu consulta con IA. Escribe 'volver' para regresar al menú.");
         }
         return;
@@ -681,15 +651,22 @@ async function procesarMensajeCentinela(fromJid, text, msgId) {
                 "✅ *Sin ciclones activos en este momento.*"
             );
         }
-    } else if (body === '6') {
+    } else if (body === '6' || cleanCmd.startsWith('6 ') || cleanCmd.startsWith('ia ')) {
+        if (cleanCmd.startsWith('6 ') || cleanCmd.startsWith('ia ')) {
+            const directQ = body.replace(/^(?:6|ia)\s+/i, '').trim();
+            await sendMsg("🤖 *Consultando telemetría CFE y analizando con Gemini IA...*");
+            const ans = await askCentinelaAI(fromJid, directQ);
+            await sendMsg(`🤖 *Centinela IA · Red CFE:*\n\n${ans}`);
+            return;
+        }
         usuariosEnModoIA.add(fromJid);
         await sendMsg(
-            "🤖 *¡Hola! Ahora estás hablando con el Centinela de SPH potenciado con IA*\n\n" +
-            "Puedo ayudarte con:\n" +
-            "• 📊 Análisis de datos\n" +
-            "• ❓ Preguntas técnicas\n" +
-            "• 🔍 Consultas sobre operación\n" +
-            "• 💡 Recomendaciones\n\n" +
+            "🤖 *¡Hola! Ahora estás hablando con Centinela IA (Gemini) conectado en vivo a la red CFE.*\n\n" +
+            "Puedo responder con datos reales del momento sobre:\n" +
+            "• 🌊 Niveles, Δ 3h, NAMO, volúmenes (Mm³) y % de llenado de las 27 presas\n" +
+            "• 🚨 Alertas activas, cascadas hidráulicas y ETA al NAMO\n" +
+            "• 🌧️ Lluvias 24h en las 22 cuencas GOES\n" +
+            "• 📡 Salud de la red, estaciones fuera de línea y sensores\n\n" +
             "💬 *Escribe tu pregunta*\n\n" +
             "💡 _Escribe 'volver' para regresar al menú principal._"
         );
