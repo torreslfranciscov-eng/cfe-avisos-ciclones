@@ -19,3 +19,11 @@ services:
         value: 3
       - key: BOLETIN_DIARIO_AUTO
         value: "true"
+      - key: ALERTS_AUTO_ENABLED
+        value: "true"
+      - key: ALERTS_POLL_MINUTES
+        value: 10
+      - key: ALERTS_COOLDOWN_CRITICA_MIN
+        value: 120
+      - key: ALERTS_COOLDOWN_ALERTA_MIN
+        value: 360

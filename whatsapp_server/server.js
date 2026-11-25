@@ -728,23 +728,49 @@ app.get('/status', (req, res) => {
 // DESPACHO AUTOMÁTICO DE EMBALSES (CADA 3 HORAS EN RELOJ CST + BOLETÍN 06:30)
 // ==========================================
 const GRUPO_AVISOS_CICLONES_RAW = process.env.EMBALSES_GRUPO_JID || '120363412138898868@g.us';
+const ALERTS_GRUPO_RAW = process.env.ALERTS_GRUPO_JID || GRUPO_AVISOS_CICLONES_RAW;
 const EMBALSES_AUTO_CRP = (process.env.EMBALSES_AUTO_CRP || 'ALL').trim().toUpperCase();
 const EMBALSES_INTERVAL_HOURS = Math.max(1, parseInt(process.env.EMBALSES_INTERVAL_HOURS || '3', 10));
 const BOLETIN_DIARIO_AUTO = (process.env.BOLETIN_DIARIO_AUTO || 'true').toLowerCase() !== 'false';
+const ALERTS_AUTO_ENABLED = (process.env.ALERTS_AUTO_ENABLED || 'true').toLowerCase() !== 'false';
+const ALERTS_POLL_MINUTES = Math.max(2, parseInt(process.env.ALERTS_POLL_MINUTES || '10', 10));
+const ALERTS_COOLDOWN_CRITICA_MS = Math.max(15, parseInt(process.env.ALERTS_COOLDOWN_CRITICA_MIN || '120', 10)) * 60 * 1000;
+const ALERTS_COOLDOWN_ALERTA_MS = Math.max(30, parseInt(process.env.ALERTS_COOLDOWN_ALERTA_MIN || '360', 10)) * 60 * 1000;
+const ALERTS_AUTO_CATEGORIES = (process.env.ALERTS_AUTO_CATEGORIES || 'EMBALSES,AVENIDAS,RED_HIDROMETRICA').trim();
+const ALERTS_STATE_FILE = path.join(__dirname, 'alerts_dispatch_state.json');
+
 let temporizadorEmbalses = null;
+let temporizadorAlertas = null;
 let lastDispatched3hSlot = null;
 let lastDispatchedDailyDate = null;
 
-function getEmbalsesRecipients() {
-    return GRUPO_AVISOS_CICLONES_RAW.split(',').map(x => x.trim()).filter(Boolean);
+function loadAlertsState() {
+    try {
+        if (fs.existsSync(ALERTS_STATE_FILE)) {
+            return JSON.parse(fs.readFileSync(ALERTS_STATE_FILE, 'utf8')) || {};
+        }
+    } catch (e) {}
+    return {};
 }
 
-async function enviarTextoAGruposEmbalses(texto, tag = 'CRON-EMBALSES') {
+function saveAlertsState(state) {
+    try {
+        fs.writeFileSync(ALERTS_STATE_FILE, JSON.stringify(state, null, 2), 'utf8');
+    } catch (e) {
+        console.warn('[CRON-ALERTAS] No se pudo guardar estado de alertas:', e.message);
+    }
+}
+
+function getEmbalsesRecipients(rawOverride = null) {
+    return (rawOverride || GRUPO_AVISOS_CICLONES_RAW).split(',').map(x => x.trim()).filter(Boolean);
+}
+
+async function enviarTextoAGruposEmbalses(texto, tag = 'CRON-EMBALSES', rawRecipients = null) {
     if (!waSock || clientStatus !== 'READY') {
         console.log(`[${tag}] WhatsApp no está listo, se omitirá este envío.`);
         return { ok: false, sent: 0, reason: 'WHATSAPP_NOT_READY' };
     }
-    const recipients = getEmbalsesRecipients();
+    const recipients = getEmbalsesRecipients(rawRecipients);
     if (!recipients.length) {
         return { ok: false, sent: 0, reason: 'NO_RECIPIENTS' };
     }
@@ -827,10 +853,95 @@ function tickCronHidrometrico() {
     }
 }
 
+async function despacharAlertasAutomaticas({ force = false, crp = null } = {}) {
+    try {
+        const crpUse = crp !== null ? crp : (EMBALSES_AUTO_CRP === 'ALL' ? null : EMBALSES_AUTO_CRP);
+        const resAl = await getAlertsReport({
+            severity: 'CRITICA,ALERTA',
+            category: ALERTS_AUTO_CATEGORIES,
+            crp: crpUse
+        });
+        const activeAlerts = resAl.alertas || [];
+        const prevState = loadAlertsState();
+        const nextState = {};
+        const nowMs = Date.now();
+        const toNotify = [];
+
+        for (const a of activeAlerts) {
+            const key = `${a.codigo}::${a.id_asignado || a.estacion || 'GEN'}`;
+            const prev = prevState[key];
+            const cooldownMs = a.severidad === 'CRITICA' ? ALERTS_COOLDOWN_CRITICA_MS : ALERTS_COOLDOWN_ALERTA_MS;
+            const escalated = prev && prev.severidad !== 'CRITICA' && a.severidad === 'CRITICA';
+            const shouldSend = force || !prev || escalated || ((nowMs - (prev.lastSentMs || 0)) >= cooldownMs);
+
+            if (shouldSend) {
+                toNotify.push({ ...a, _isNew: !prev, _escalated: !!escalated });
+                nextState[key] = { severidad: a.severidad, lastSentMs: nowMs };
+            } else {
+                nextState[key] = prev;
+            }
+        }
+
+        // Guardar estado limpio (las alertas resueltas salen automáticamente de nextState)
+        saveAlertsState(nextState);
+
+        if (!toNotify.length) {
+            return { ok: true, sent: 0, active: activeAlerts.length, notified: 0, reason: 'NO_NEW_OR_DUE_ALERTS' };
+        }
+
+        const cst = new Date(nowMs - 6 * 3600 * 1000);
+        const fecha = `${String(cst.getUTCDate()).padStart(2, '0')}/${String(cst.getUTCMonth() + 1).padStart(2, '0')}/${cst.getUTCFullYear()}`;
+        const hora = `${String(cst.getUTCHours()).padStart(2, '0')}:${String(cst.getUTCMinutes()).padStart(2, '0')}`;
+        const nCrit = toNotify.filter(x => x.severidad === 'CRITICA').length;
+        const nAl = toNotify.filter(x => x.severidad === 'ALERTA').length;
+
+        const header = nCrit > 0
+            ? '🚨 *ALERTA CRÍTICA AUTOMÁTICA · CFE*'
+            : '⚠️ *ALERTA PREVENTIVA AUTOMÁTICA · CFE*';
+        const lines = [
+            header,
+            `📅 ${fecha}   ⏰ ${hora} h`,
+            `🔴 Críticas: ${nCrit}  |  🟡 Alertas: ${nAl}`,
+        ];
+
+        for (const [catKey, catLabel] of [
+            ['EMBALSES', 'EMBALSES Y PRESAS'],
+            ['AVENIDAS', 'AVENIDAS Y LLUVIA INTENSA'],
+            ['RED_HIDROMETRICA', 'RED HIDROMÉTRICA (QA/QC)']
+        ]) {
+            const grp = toNotify.filter(x => x.categoria === catKey);
+            if (!grp.length) continue;
+            lines.push('');
+            lines.push(`═══ ${catLabel} (${grp.length}) ═══`);
+            for (const a of grp) {
+                const ico = a.severidad === 'CRITICA' ? '🔴' : '🟡';
+                const tag = a.clave_cenace ? ` [${a.clave_cenace}]` : '';
+                const badge = a._escalated ? ' *(ESCALÓ A CRÍTICA)*' : (a._isNew ? ' *(NUEVA)*' : '');
+                lines.push(`${ico} [${a.crp}] ${a.titulo}${tag}${badge}`);
+                lines.push(`   ${a.detalle}`);
+            }
+        }
+
+        const sendRes = await enviarTextoAGruposEmbalses(lines.join('\n').trim(), 'CRON-ALERTAS', ALERTS_GRUPO_RAW);
+        return { ...sendRes, active: activeAlerts.length, notified: toNotify.length };
+    } catch (err) {
+        console.error('❌ [CRON-ALERTAS] Error evaluando/enviando alertas automáticas:', err.message);
+        return { ok: false, sent: 0, error: err.message };
+    }
+}
+
 function iniciarCronEmbalses() {
     if (temporizadorEmbalses) clearInterval(temporizadorEmbalses);
     temporizadorEmbalses = setInterval(tickCronHidrometrico, 60 * 1000);
     console.log(`⏰ [CRON-EMBALSES] Programador activo: cada ${EMBALSES_INTERVAL_HOURS}h exactas CST (CRP=${EMBALSES_AUTO_CRP}) + Boletín 06:30 CST=${BOLETIN_DIARIO_AUTO} -> ${GRUPO_AVISOS_CICLONES_RAW}`);
+
+    if (temporizadorAlertas) clearInterval(temporizadorAlertas);
+    if (ALERTS_AUTO_ENABLED) {
+        // Primera evaluación 45s después de conectar WhatsApp, luego cada ALERTS_POLL_MINUTES
+        setTimeout(() => despacharAlertasAutomaticas({ force: false }), 45 * 1000);
+        temporizadorAlertas = setInterval(() => despacharAlertasAutomaticas({ force: false }), ALERTS_POLL_MINUTES * 60 * 1000);
+        console.log(`🚨 [CRON-ALERTAS] Monitor automático activo cada ${ALERTS_POLL_MINUTES} min (🔴/🟡) -> ${ALERTS_GRUPO_RAW}`);
+    }
 }
 
 // Endpoints HTTP internos para consulta y disparo manual de reportes
@@ -849,9 +960,15 @@ app.get('/api/embalses/dispatch-now', async (req, res) => {
     try {
         const mode = (req.query.mode || '3h').toLowerCase();
         const crp = req.query.crp ? String(req.query.crp).toUpperCase() : null;
-        const result = mode === 'daily'
-            ? await despacharBoletinDiarioAutomatico()
-            : await despacharReporteAutomaticoEmbalses(crp);
+        const force = String(req.query.force || 'true').toLowerCase() === 'true';
+        let result;
+        if (mode === 'daily') {
+            result = await despacharBoletinDiarioAutomatico();
+        } else if (mode === 'alerts') {
+            result = await despacharAlertasAutomaticas({ force, crp });
+        } else {
+            result = await despacharReporteAutomaticoEmbalses(crp);
+        }
         res.json({ ok: result.ok, mode, result });
     } catch (e) {
         res.status(500).json({ ok: false, error: e.message });
@@ -943,6 +1060,8 @@ async function startBaileys() {
                 // 4.1. Filtro estricto anti-eco de HydroCloud y reportes salientes
                 if (trimmed.includes('REPORTE DE EMBALSES') ||
                     trimmed.includes('ALERTAS HIDRÁULICAS') ||
+                    trimmed.includes('ALERTA CRÍTICA AUTOMÁTICA') ||
+                    trimmed.includes('ALERTA PREVENTIVA AUTOMÁTICA') ||
                     trimmed.includes('SALUD DE LA RED HIDROMÉTRICA') ||
                     trimmed.includes('BOLETÍN HIDROLÓGICO DIARIO') ||
                     trimmed.includes('CORTE DE LLUVIA POR CUENCA') ||
@@ -978,6 +1097,10 @@ async function startBaileys() {
                 if (temporizadorEmbalses) {
                     clearInterval(temporizadorEmbalses);
                     temporizadorEmbalses = null;
+                }
+                if (temporizadorAlertas) {
+                    clearInterval(temporizadorAlertas);
+                    temporizadorAlertas = null;
                 }
                 if (isLoggedOut || statusCode === DisconnectReason.loggedOut || statusCode === 401) {
                     console.log('Sesión cerrada formalmente (loggedOut). Limpiando credenciales antiguas para generar nuevo QR...');
