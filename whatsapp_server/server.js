@@ -12,7 +12,8 @@ const {
     useMultiFileAuthState,
     DisconnectReason,
     fetchLatestBaileysVersion,
-    Browsers
+    Browsers,
+    downloadMediaMessage
 } = require('@whiskeysockets/baileys');
 const {
     generateEmbalsesReport,
@@ -1143,6 +1144,242 @@ function iniciarCronEmbalses() {
     }
 }
 
+// ==========================================
+// PUENTE FUNVASOS: RECEPCIÓN DE EXCELS DESDE WHATSAPP -> CFE MIRROR API -> SERVIDOR CFE
+// ==========================================
+const FUNVASOS_BRIDGE_ENABLED = (process.env.FUNVASOS_BRIDGE_ENABLED || 'true').toLowerCase() !== 'false';
+const FUNVASOS_GROUP_JIDS = (process.env.FUNVASOS_GROUP_JID || GRUPO_AVISOS_CICLONES_RAW)
+    .split(',').map(x => x.trim()).filter(Boolean);
+const FUNVASOS_ALLOW_DM = (process.env.FUNVASOS_ALLOW_DM || 'true').toLowerCase() !== 'false';
+const MIRROR_API_BASE = (process.env.CFE_MIRROR_API_URL || 'https://cfe-mirror-api.onrender.com').replace(/\/+$/, '');
+const MIRROR_INGEST_SECRET = (process.env.CFE_MIRROR_INGEST_SECRET || process.env.INGEST_SECRET || '').trim();
+
+const FUNVASOS_CRP_MENU = [
+    { num: '1', clave: 'GRIJALVA', label: 'Grijalva' },
+    { num: '2', clave: 'GOLFO', label: 'Golfo' },
+    { num: '3', clave: 'PACIFICO_SUR', label: 'Pacífico Sur (Balsas / Zimapán)' },
+    { num: '4', clave: 'OCCIDENTE', label: 'Occidente (Santiago)' },
+    { num: '5', clave: 'PACIFICO_NORTE', label: 'Pacífico Norte (Noroeste)' }
+];
+
+// Pendientes de confirmación de CRP (Opción 3): key = `${chatJid}::${senderJid}`
+const pendingFunVasosConfirm = new Map();
+
+function normalizeTextSimple(str) {
+    return String(str || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase();
+}
+
+function detectFunVasosCrp(filename, caption) {
+    const hay = normalizeTextSimple(`${filename || ''} ${caption || ''}`);
+    const rules = [
+        { clave: 'GRIJALVA', kw: ['grijalva', 'sureste', 'angostura', 'chicoasen', 'malpaso', 'penitas', 'belisario', 'moreno torres'] },
+        { clave: 'GOLFO', kw: ['golfo', 'temascal', 'cerro de oro', 'mazatepec', 'la soledad', 'catemaco', 'chilapan', 'canseco', 'papaloapan', 'apulco'] },
+        { clave: 'PACIFICO_SUR', kw: ['pacifico sur', 'pacifico_sur', 'pacsur', 'balsas', 'el caracol', 'caracol', 'infiernillo', 'la villita', 'villita', 'la venta', 'zimapan', 'moctezuma'] },
+        { clave: 'OCCIDENTE', kw: ['occidente', 'santiago', 'santa rosa', 'la yesca', 'yesca', 'el cajon', 'cajon', 'aguamilpa'] },
+        { clave: 'PACIFICO_NORTE', kw: ['pacifico norte', 'pacifico_norte', 'pacnorte', 'noroeste', 'huites', 'novillo', 'rio fuerte', 'rio yaqui', 'colosio'] }
+    ];
+    for (const r of rules) {
+        if (r.kw.some(k => hay.includes(k))) return r.clave;
+    }
+    return null;
+}
+
+function extractFechaOperativa(filename, caption) {
+    const s = `${filename || ''} ${caption || ''}`;
+    let m = s.match(/\b(20\d{2})[-_/](\d{2})[-_/](\d{2})\b/);
+    if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+    m = s.match(/\b(\d{2})[-_/](\d{2})[-_/](20\d{2})\b/);
+    if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+    m = s.match(/\b(20\d{2})(\d{2})(\d{2})\b/);
+    if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+    // Fecha local Centro México (UTC-6)
+    const cst = new Date(Date.now() - 6 * 3600 * 1000);
+    return `${cst.getUTCFullYear()}-${String(cst.getUTCMonth() + 1).padStart(2, '0')}-${String(cst.getUTCDate()).padStart(2, '0')}`;
+}
+
+function getDocumentFromMsg(msg) {
+    const m = msg?.message || {};
+    const doc = m.documentMessage || m.documentWithCaptionMessage?.message?.documentMessage || null;
+    if (!doc) return null;
+    const filename = doc.fileName || doc.title || '';
+    const ext = path.extname(filename).toLowerCase();
+    if (!['.xlsx', '.xlsm', '.xls'].includes(ext)) return null;
+    const caption = doc.caption || '';
+    return { doc, filename, ext, caption };
+}
+
+async function replyQuoted(chatJid, text, quotedMsg) {
+    if (!waSock) return;
+    const prefix = text.slice(0, 40);
+    recentSentTexts.add(prefix);
+    setTimeout(() => recentSentTexts.delete(prefix), 60000);
+    const res = await waSock.sendMessage(chatJid, { text }, quotedMsg ? { quoted: quotedMsg } : {});
+    if (res?.key?.id) botSentMessageIds.add(res.key.id);
+}
+
+async function pollFunVasosAck(itemId, crpClave, fechaOperativa, chatJid, quotedMsg) {
+    const maxAttempts = 12; // 12 * 15s = 3 minutos
+    for (let i = 0; i < maxAttempts; i++) {
+        await new Promise(r => setTimeout(r, 15000));
+        try {
+            const resp = await fetch(`${MIRROR_API_BASE}/api/v1/funvasos-inbox/${itemId}/status`, {
+                headers: { 'X-Ingest-Secret': MIRROR_INGEST_SECRET }
+            });
+            if (!resp.ok) continue;
+            const st = await resp.json();
+            if (st.status === 'ARCHIVED') {
+                if (quotedMsg?.key) await waSock.sendMessage(chatJid, { react: { text: '✅', key: quotedMsg.key } }).catch(() => {});
+                await replyQuoted(
+                    chatJid,
+                    `✅ *Archivado en Repositorio FunVasos*\n📁 *${st.standard_file_name || ''}*\n🏷️ CRP: *${crpClave}* · Fecha: *${fechaOperativa}*\n${st.result_message || ''}`.trim(),
+                    quotedMsg
+                );
+                return;
+            }
+            if (st.status === 'DUPLICATE') {
+                if (quotedMsg?.key) await waSock.sendMessage(chatJid, { react: { text: '♻️', key: quotedMsg.key } }).catch(() => {});
+                await replyQuoted(chatJid, `♻️ *Archivo duplicado (sin cambios)*\n${st.result_message || 'Ya existía en FunVasos.'}`, quotedMsg);
+                return;
+            }
+            if (st.status === 'ERROR') {
+                if (quotedMsg?.key) await waSock.sendMessage(chatJid, { react: { text: '⚠️', key: quotedMsg.key } }).catch(() => {});
+                await replyQuoted(chatJid, `⚠️ *No se pudo archivar en FunVasos*\n${st.result_message || 'Error al validar el Excel.'}`, quotedMsg);
+                return;
+            }
+        } catch (e) {}
+    }
+    await replyQuoted(
+        chatJid,
+        `📥 *Excel recibido en bandeja puente FunVasos* (ID #${itemId} · *${crpClave}* · *${fechaOperativa}*).\nSe archivará automáticamente en el servidor CFE en el próximo ciclo de descarga.`,
+        quotedMsg
+    );
+}
+
+async function enqueueFunVasosExcel({ buffer, filename, caption, crpClave, fechaOperativa, senderName, senderJid, chatJid, quotedMsg }) {
+    if (!MIRROR_INGEST_SECRET) {
+        await replyQuoted(chatJid, '⚠️ Puente FunVasos sin configurar (`CFE_MIRROR_INGEST_SECRET` faltante en Render).', quotedMsg);
+        return;
+    }
+    if (quotedMsg?.key) {
+        await waSock.sendMessage(chatJid, { react: { text: '⏳', key: quotedMsg.key } }).catch(() => {});
+    }
+    try {
+        const resp = await fetch(`${MIRROR_API_BASE}/api/v1/funvasos-inbox/upload`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Ingest-Secret': MIRROR_INGEST_SECRET
+            },
+            body: JSON.stringify({
+                crp_clave: crpClave,
+                fecha_operativa: fechaOperativa,
+                original_filename: filename,
+                file_b64: buffer.toString('base64'),
+                sender_name: senderName || '',
+                sender_jid: senderJid || '',
+                source_group_jid: chatJid || '',
+                caption: caption || ''
+            })
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || !data.ok) {
+            if (quotedMsg?.key) await waSock.sendMessage(chatJid, { react: { text: '⚠️', key: quotedMsg.key } }).catch(() => {});
+            await replyQuoted(chatJid, `⚠️ Error al encolar Excel para FunVasos: ${data.detail || resp.status}`, quotedMsg);
+            return;
+        }
+        if (data.already_queued && data.status === 'ARCHIVED') {
+            if (quotedMsg?.key) await waSock.sendMessage(chatJid, { react: { text: '♻️', key: quotedMsg.key } }).catch(() => {});
+            await replyQuoted(chatJid, `♻️ Este archivo ya había sido archivado en FunVasos como *${data.standard_file_name || filename}* (sin duplicar).`, quotedMsg);
+            return;
+        }
+        console.log(`📥 [FUNVASOS-WA] Encolado ID #${data.id} (${crpClave} · ${fechaOperativa} · ${filename}) de ${senderName}`);
+        // Esperar ACK del servidor CFE en segundo plano sin bloquear el loop de mensajes
+        pollFunVasosAck(data.id, crpClave, fechaOperativa, chatJid, quotedMsg).catch(() => {});
+    } catch (err) {
+        console.error('❌ [FUNVASOS-WA] Error subiendo a mirror inbox:', err.message);
+        await replyQuoted(chatJid, `⚠️ No se pudo conectar al puente FunVasos: ${err.message}`, quotedMsg);
+    }
+}
+
+async function handleIncomingFunVasosDocument(msg, chatJid, isGroup) {
+    if (!FUNVASOS_BRIDGE_ENABLED) return false;
+    const docInfo = getDocumentFromMsg(msg);
+    if (!docInfo) return false;
+
+    if (isGroup && !FUNVASOS_GROUP_JIDS.includes(chatJid)) return false;
+    if (!isGroup && !FUNVASOS_ALLOW_DM) return false;
+
+    const senderJid = msg.key.participant || chatJid;
+    const senderName = msg.pushName || senderJid.split('@')[0];
+
+    try {
+        const buffer = await downloadMediaMessage(msg, 'buffer', {}, { logger: pino({ level: 'silent' }) });
+        if (!buffer || !buffer.length) return true;
+
+        const fechaOperativa = extractFechaOperativa(docInfo.filename, docInfo.caption);
+        const crpClave = detectFunVasosCrp(docInfo.filename, docInfo.caption);
+
+        if (crpClave) {
+            await enqueueFunVasosExcel({
+                buffer,
+                filename: docInfo.filename,
+                caption: docInfo.caption,
+                crpClave,
+                fechaOperativa,
+                senderName,
+                senderJid,
+                chatJid,
+                quotedMsg: msg
+            });
+        } else {
+            // Opción 3: pedir confirmación rápida 1-5 al remitente (TTL 15 min)
+            const key = `${chatJid}::${senderJid}`;
+            pendingFunVasosConfirm.set(key, {
+                buffer,
+                filename: docInfo.filename,
+                caption: docInfo.caption,
+                fechaOperativa,
+                senderName,
+                senderJid,
+                chatJid,
+                quotedMsg: msg,
+                expiresAt: Date.now() + 15 * 60 * 1000
+            });
+            const menuLines = FUNVASOS_CRP_MENU.map(x => `${x.num}️⃣ ${x.label}`).join('\n');
+            await replyQuoted(
+                chatJid,
+                `📄 Recibí *${docInfo.filename}* (${fechaOperativa}), pero no pude identificar el Departamento Regional (CRP).\n\nResponde con el número para archivarlo en *FunVasos*:\n${menuLines}`,
+                msg
+            );
+        }
+    } catch (err) {
+        console.error('❌ [FUNVASOS-WA] Error descargando Excel de WhatsApp:', err.message);
+    }
+    return true;
+}
+
+async function handlePendingFunVasosReply(msg, chatJid, text) {
+    const senderJid = msg.key.participant || chatJid;
+    const key = `${chatJid}::${senderJid}`;
+    const pending = pendingFunVasosConfirm.get(key);
+    if (!pending) return false;
+    if (Date.now() > pending.expiresAt) {
+        pendingFunVasosConfirm.delete(key);
+        return false;
+    }
+    const clean = normalizeTextSimple(text).replace(/^[#!]+/, '').trim();
+    const byNum = FUNVASOS_CRP_MENU.find(x => x.num === clean);
+    const crpClave = byNum ? byNum.clave : detectFunVasosCrp('', clean);
+    if (!crpClave) return false;
+
+    pendingFunVasosConfirm.delete(key);
+    await enqueueFunVasosExcel({ ...pending, crpClave });
+    return true;
+}
+
 // Endpoints HTTP internos para consulta y disparo manual de reportes
 app.get('/api/embalses/reporte', async (req, res) => {
     try {
@@ -1245,7 +1482,12 @@ async function startBaileys() {
                 if (from === 'status@broadcast') continue;
 
                 // 5. En grupos (@g.us), NUNCA responder en automático a menos que sea un comando explícito (#, !, centinela)
+                //    EXCEPCIÓN: Documentos Excel de FunVasos en el grupo autorizado y su confirmación 1-5.
                 const isGroup = from && from.endsWith('@g.us');
+
+                if (await handleIncomingFunVasosDocument(msg, from, isGroup)) {
+                    continue;
+                }
 
                 const text = msg.message?.conversation || 
                              msg.message?.extendedTextMessage?.text || 
@@ -1254,6 +1496,11 @@ async function startBaileys() {
                 if (!text || !text.trim()) continue;
 
                 const trimmed = text.trim();
+
+                if (await handlePendingFunVasosReply(msg, from, trimmed)) {
+                    continue;
+                }
+
                 console.log('[WA MSG RECV]', { from, text: trimmed.slice(0, 60), fromMe: msg.key.fromMe, id: msg.key.id });
 
                 // 4.1. Filtro estricto anti-eco de HydroCloud y reportes salientes
