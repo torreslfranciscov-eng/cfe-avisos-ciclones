@@ -856,14 +856,15 @@ app.get('/status', (req, res) => {
 });
 
 // ==========================================
-// DESPACHO AUTOMÁTICO DE EMBALSES (CADA 3 HORAS EN RELOJ CST + BOLETÍN 06:30)
+// DESPACHO AUTOMÁTICO DE EMBALSES (CADA 3 HORAS AL MINUTO 59 CST)
 // ==========================================
 const GRUPO_AVISOS_CICLONES_RAW = process.env.EMBALSES_GRUPO_JID || '120363412138898868@g.us';
 const ALERTS_GRUPO_RAW = process.env.ALERTS_GRUPO_JID || GRUPO_AVISOS_CICLONES_RAW;
 const EMBALSES_AUTO_CRP = (process.env.EMBALSES_AUTO_CRP || 'ALL').trim().toUpperCase();
 const EMBALSES_INTERVAL_HOURS = Math.max(1, parseInt(process.env.EMBALSES_INTERVAL_HOURS || '3', 10));
-const BOLETIN_DIARIO_AUTO = (process.env.BOLETIN_DIARIO_AUTO || 'true').toLowerCase() !== 'false';
-const ALERTS_AUTO_ENABLED = (process.env.ALERTS_AUTO_ENABLED || 'true').toLowerCase() !== 'false';
+const EMBALSES_DISPATCH_MINUTE = Math.min(59, Math.max(0, parseInt(process.env.EMBALSES_DISPATCH_MINUTE || '59', 10)));
+const BOLETIN_DIARIO_AUTO = (process.env.BOLETIN_DIARIO_AUTO || 'false').toLowerCase() === 'true';
+const ALERTS_AUTO_ENABLED = (process.env.ALERTS_AUTO_ENABLED || 'false').toLowerCase() === 'true';
 const ALERTS_POLL_MINUTES = Math.max(2, parseInt(process.env.ALERTS_POLL_MINUTES || '10', 10));
 const ALERTS_COOLDOWN_CRITICA_MS = Math.max(15, parseInt(process.env.ALERTS_COOLDOWN_CRITICA_MIN || '120', 10)) * 60 * 1000;
 const ALERTS_COOLDOWN_ALERTA_MS = Math.max(30, parseInt(process.env.ALERTS_COOLDOWN_ALERTA_MIN || '360', 10)) * 60 * 1000;
@@ -1030,16 +1031,16 @@ function tickCronHidrometrico() {
     const mm = cst.getUTCMinutes();
     const dateKey = `${y}-${m}-${d}`;
 
-    // 1) Reporte de embalses + alertas cada 3 horas exactas CST (00:00, 03:00, 06:00, 09:00, 12:00, 15:00, 18:00, 21:00)
-    if (hh % EMBALSES_INTERVAL_HOURS === 0 && mm <= 4) {
-        const slotKey = `${dateKey}_${String(hh).padStart(2, '0')}`;
+    // 1) Reporte de embalses cada 3 horas al minuto 59 CST (00:59, 03:59, 06:59, 09:59, 12:59, 15:59, 18:59, 21:59)
+    if (hh % EMBALSES_INTERVAL_HOURS === 0 && mm === EMBALSES_DISPATCH_MINUTE) {
+        const slotKey = `${dateKey}_${String(hh).padStart(2, '0')}_${String(mm).padStart(2, '0')}`;
         if (lastDispatched3hSlot !== slotKey) {
             lastDispatched3hSlot = slotKey;
             despacharReporteAutomaticoEmbalses();
         }
     }
 
-    // 2) Boletín Hidrológico Diario Integral a las 06:30 CST (corte 06:00 de lluvia 24h + balance nacional)
+    // 2) Boletín Hidrológico Diario (desactivado por defecto; solo si BOLETIN_DIARIO_AUTO=true)
     if (BOLETIN_DIARIO_AUTO && hh === 6 && mm >= 30 && mm <= 34) {
         if (lastDispatchedDailyDate !== dateKey) {
             lastDispatchedDailyDate = dateKey;
@@ -1127,15 +1128,18 @@ async function despacharAlertasAutomaticas({ force = false, crp = null } = {}) {
 
 function iniciarCronEmbalses() {
     if (temporizadorEmbalses) clearInterval(temporizadorEmbalses);
-    temporizadorEmbalses = setInterval(tickCronHidrometrico, 60 * 1000);
-    console.log(`⏰ [CRON-EMBALSES] Programador activo: cada ${EMBALSES_INTERVAL_HOURS}h exactas CST (CRP=${EMBALSES_AUTO_CRP}) + Boletín 06:30 CST=${BOLETIN_DIARIO_AUTO} -> ${GRUPO_AVISOS_CICLONES_RAW}`);
+    // Revisión cada 20s para garantizar disparo exacto al minuto 59 sin perder ventana por jitter
+    temporizadorEmbalses = setInterval(tickCronHidrometrico, 20 * 1000);
+    const minPad = String(EMBALSES_DISPATCH_MINUTE).padStart(2, '0');
+    console.log(`⏰ [CRON-EMBALSES] Programador activo: cada ${EMBALSES_INTERVAL_HOURS}h al minuto :${minPad} CST (00:${minPad}, 03:${minPad}, 06:${minPad}, 09:${minPad}...) | CRP=${EMBALSES_AUTO_CRP} | BoletínAuto=${BOLETIN_DIARIO_AUTO} | AlertasAuto=${ALERTS_AUTO_ENABLED} -> ${GRUPO_AVISOS_CICLONES_RAW}`);
 
     if (temporizadorAlertas) clearInterval(temporizadorAlertas);
     if (ALERTS_AUTO_ENABLED) {
-        // Primera evaluación 45s después de conectar WhatsApp, luego cada ALERTS_POLL_MINUTES
         setTimeout(() => despacharAlertasAutomaticas({ force: false }), 45 * 1000);
         temporizadorAlertas = setInterval(() => despacharAlertasAutomaticas({ force: false }), ALERTS_POLL_MINUTES * 60 * 1000);
         console.log(`🚨 [CRON-ALERTAS] Monitor automático activo cada ${ALERTS_POLL_MINUTES} min (🔴/🟡) -> ${ALERTS_GRUPO_RAW}`);
+    } else {
+        console.log('🔕 [CRON-ALERTAS] Envío automático de alertas desactivado (disponible bajo demanda en opción 14).');
     }
 }
 
