@@ -1489,7 +1489,9 @@ async function startBaileys() {
         waSock.ev.on('creds.update', saveCreds);
 
         waSock.ev.on('messages.upsert', async (m) => {
-            if (m.type !== 'notify') return; // Ignorar sincronización de historial antiguo
+            // Baileys emite 'notify' para mensajes entrantes de terceros y 'append' para mensajes enviados desde tu propio teléfono (fromMe).
+            // El filtro de 90 segundos abajo evita procesar historial antiguo.
+            if (m.type !== 'notify' && m.type !== 'append') return;
 
             const nowSec = Math.floor(Date.now() / 1000);
 
