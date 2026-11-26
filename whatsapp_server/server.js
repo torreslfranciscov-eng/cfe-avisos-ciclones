@@ -1172,7 +1172,25 @@ function normalizeTextSimple(str) {
         .toLowerCase();
 }
 
+function unwrapMessageContent(rawMsg) {
+    let m = rawMsg || {};
+    for (let i = 0; i < 4; i++) {
+        if (m.ephemeralMessage?.message) m = m.ephemeralMessage.message;
+        else if (m.viewOnceMessage?.message) m = m.viewOnceMessage.message;
+        else if (m.viewOnceMessageV2?.message) m = m.viewOnceMessageV2.message;
+        else if (m.viewOnceMessageV2Extension?.message) m = m.viewOnceMessageV2Extension.message;
+        else if (m.documentWithCaptionMessage?.message) m = m.documentWithCaptionMessage.message;
+        else break;
+    }
+    return m;
+}
+
 function detectFunVasosCrp(filename, caption) {
+    const fnClean = normalizeTextSimple(filename || '');
+    // Patrón oficial Grijalva: FINddmmyy.xlsx (ej. FIN251126.xlsx, FIN011126.xlsx)
+    if (/^fin\d{6}\.(xlsx|xlsm|xls)$/i.test(fnClean.trim())) {
+        return 'GRIJALVA';
+    }
     const hay = normalizeTextSimple(`${filename || ''} ${caption || ''}`);
     const rules = [
         { clave: 'GRIJALVA', kw: ['grijalva', 'sureste', 'angostura', 'chicoasen', 'malpaso', 'penitas', 'belisario', 'moreno torres'] },
@@ -1189,7 +1207,10 @@ function detectFunVasosCrp(filename, caption) {
 
 function extractFechaOperativa(filename, caption) {
     const s = `${filename || ''} ${caption || ''}`;
-    let m = s.match(/\b(20\d{2})[-_/](\d{2})[-_/](\d{2})\b/);
+    // Patrón FINddmmyy (ej. FIN011126.xlsx -> 2026-11-01)
+    let m = String(filename || '').match(/^fin(\d{2})(\d{2})(\d{2})\.(xlsx|xlsm|xls)$/i);
+    if (m) return `20${m[3]}-${m[2]}-${m[1]}`;
+    m = s.match(/\b(20\d{2})[-_/](\d{2})[-_/](\d{2})\b/);
     if (m) return `${m[1]}-${m[2]}-${m[3]}`;
     m = s.match(/\b(\d{2})[-_/](\d{2})[-_/](20\d{2})\b/);
     if (m) return `${m[3]}-${m[2]}-${m[1]}`;
@@ -1201,8 +1222,8 @@ function extractFechaOperativa(filename, caption) {
 }
 
 function getDocumentFromMsg(msg) {
-    const m = msg?.message || {};
-    const doc = m.documentMessage || m.documentWithCaptionMessage?.message?.documentMessage || null;
+    const m = unwrapMessageContent(msg?.message);
+    const doc = m.documentMessage || null;
     if (!doc) return null;
     const filename = doc.fileName || doc.title || '';
     const ext = path.extname(filename).toLowerCase();
@@ -1309,7 +1330,18 @@ async function handleIncomingFunVasosDocument(msg, chatJid, isGroup) {
     const docInfo = getDocumentFromMsg(msg);
     if (!docInfo) return false;
 
-    if (isGroup && !FUNVASOS_GROUP_JIDS.includes(chatJid)) return false;
+    console.log('[FUNVASOS-WA] Documento Excel detectado:', {
+        chatJid,
+        isGroup,
+        fromMe: !!msg.key.fromMe,
+        filename: docInfo.filename,
+        allowedGroups: FUNVASOS_GROUP_JIDS
+    });
+
+    if (isGroup && !FUNVASOS_GROUP_JIDS.includes(chatJid)) {
+        console.log(`[FUNVASOS-WA] Grupo ${chatJid} no está en FUNVASOS_GROUP_JIDS (${FUNVASOS_GROUP_JIDS.join(',')}), omitiendo.`);
+        return false;
+    }
     if (!isGroup && !FUNVASOS_ALLOW_DM) return false;
 
     const senderJid = msg.key.participant || chatJid;
@@ -1462,44 +1494,45 @@ async function startBaileys() {
             const nowSec = Math.floor(Date.now() / 1000);
 
             for (const msg of m.messages) {
-                // 1. Ignorar mensajes enviados por nosotros mismos
-                if (msg.key.fromMe) continue;
-
-                // 2. Ignorar si es un mensaje del propio bot
+                // 1. Ignorar si es un mensaje enviado por el propio bot
                 if (msg.key.id && botSentMessageIds.has(msg.key.id)) {
                     botSentMessageIds.delete(msg.key.id);
                     continue;
                 }
 
-                // 3. Ignorar mensajes viejos (más de 60 segundos) durante sincronizaciones
+                // 2. Ignorar mensajes viejos (más de 90 segundos) durante sincronizaciones
                 const msgTs = msg.messageTimestamp ? Number(msg.messageTimestamp) : 0;
-                if (msgTs > 0 && (nowSec - msgTs) > 60) {
+                if (msgTs > 0 && (nowSec - msgTs) > 90) {
                     continue;
                 }
 
                 const from = msg.key.remoteJid;
-                // 4. Ignorar estados de WhatsApp
-                if (from === 'status@broadcast') continue;
+                if (!from || from === 'status@broadcast') continue;
 
-                // 5. En grupos (@g.us), NUNCA responder en automático a menos que sea un comando explícito (#, !, centinela)
-                //    EXCEPCIÓN: Documentos Excel de FunVasos en el grupo autorizado y su confirmación 1-5.
-                const isGroup = from && from.endsWith('@g.us');
+                const isGroup = from.endsWith('@g.us');
 
+                // 3. Permitir documentos Excel de FunVasos incluso si los envía el mismo teléfono vinculado (fromMe=true)
                 if (await handleIncomingFunVasosDocument(msg, from, isGroup)) {
                     continue;
                 }
 
-                const text = msg.message?.conversation || 
-                             msg.message?.extendedTextMessage?.text || 
-                             msg.message?.imageMessage?.caption || 
+                const unwrapped = unwrapMessageContent(msg.message);
+                const text = unwrapped?.conversation || 
+                             unwrapped?.extendedTextMessage?.text || 
+                             unwrapped?.imageMessage?.caption || 
                              '';
+
+                // Permitir respuesta 1-5 de confirmación FunVasos incluso si fromMe=true
+                if (text && text.trim() && await handlePendingFunVasosReply(msg, from, text.trim())) {
+                    continue;
+                }
+
+                // 4. Para el resto del chatbot, ignorar mensajes enviados por nosotros mismos
+                if (msg.key.fromMe) continue;
+
                 if (!text || !text.trim()) continue;
 
                 const trimmed = text.trim();
-
-                if (await handlePendingFunVasosReply(msg, from, trimmed)) {
-                    continue;
-                }
 
                 console.log('[WA MSG RECV]', { from, text: trimmed.slice(0, 60), fromMe: msg.key.fromMe, id: msg.key.id });
 
