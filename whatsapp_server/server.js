@@ -1148,7 +1148,7 @@ function iniciarCronEmbalses() {
 // PUENTE FUNVASOS: RECEPCIÓN DE EXCELS DESDE WHATSAPP -> CFE MIRROR API -> SERVIDOR CFE
 // ==========================================
 const FUNVASOS_BRIDGE_ENABLED = (process.env.FUNVASOS_BRIDGE_ENABLED || 'true').toLowerCase() !== 'false';
-const FUNVASOS_GROUP_JIDS = (process.env.FUNVASOS_GROUP_JID || '')
+const FUNVASOS_GROUP_JIDS = (process.env.FUNVASOS_GROUP_JID || GRUPO_AVISOS_CICLONES_RAW)
     .split(',').map(x => x.trim()).filter(Boolean);
 const FUNVASOS_GROUP_NAMES = (process.env.FUNVASOS_GROUP_NAME || 'Seguimiento Datos de Hidrometria')
     .split(',').map(x => x.trim()).filter(Boolean);
