@@ -1148,11 +1148,39 @@ function iniciarCronEmbalses() {
 // PUENTE FUNVASOS: RECEPCIÓN DE EXCELS DESDE WHATSAPP -> CFE MIRROR API -> SERVIDOR CFE
 // ==========================================
 const FUNVASOS_BRIDGE_ENABLED = (process.env.FUNVASOS_BRIDGE_ENABLED || 'true').toLowerCase() !== 'false';
-const FUNVASOS_GROUP_JIDS = (process.env.FUNVASOS_GROUP_JID || GRUPO_AVISOS_CICLONES_RAW)
+const FUNVASOS_GROUP_JIDS = (process.env.FUNVASOS_GROUP_JID || '')
+    .split(',').map(x => x.trim()).filter(Boolean);
+const FUNVASOS_GROUP_NAMES = (process.env.FUNVASOS_GROUP_NAME || 'Seguimiento Datos de Hidrometria')
     .split(',').map(x => x.trim()).filter(Boolean);
 const FUNVASOS_ALLOW_DM = (process.env.FUNVASOS_ALLOW_DM || 'true').toLowerCase() !== 'false';
 const MIRROR_API_BASE = (process.env.CFE_MIRROR_API_URL || 'https://cfe-mirror-api.onrender.com').replace(/\/+$/, '');
 const MIRROR_INGEST_SECRET = (process.env.CFE_MIRROR_INGEST_SECRET || process.env.INGEST_SECRET || '').trim();
+
+const groupSubjectCache = new Map(); // jid -> { subject, expiresAt }
+
+async function getGroupSubjectCached(chatJid) {
+    const cached = groupSubjectCache.get(chatJid);
+    if (cached && Date.now() < cached.expiresAt) return cached.subject;
+    try {
+        const meta = await waSock.groupMetadata(chatJid);
+        const subject = meta?.subject || '';
+        groupSubjectCache.set(chatJid, { subject, expiresAt: Date.now() + 10 * 60 * 1000 });
+        return subject;
+    } catch (e) {
+        return '';
+    }
+}
+
+async function isAuthorizedFunVasosGroup(chatJid) {
+    if (FUNVASOS_GROUP_JIDS.includes(chatJid)) return true;
+    const subject = await getGroupSubjectCached(chatJid);
+    if (!subject) return false;
+    const normSubj = normalizeTextSimple(subject).trim();
+    return FUNVASOS_GROUP_NAMES.some(name => {
+        const target = normalizeTextSimple(name).trim();
+        return target && (normSubj === target || normSubj.includes(target));
+    });
+}
 
 const FUNVASOS_CRP_MENU = [
     { num: '1', clave: 'GRIJALVA', label: 'Grijalva' },
@@ -1330,19 +1358,28 @@ async function handleIncomingFunVasosDocument(msg, chatJid, isGroup) {
     const docInfo = getDocumentFromMsg(msg);
     if (!docInfo) return false;
 
-    console.log('[FUNVASOS-WA] Documento Excel detectado:', {
-        chatJid,
-        isGroup,
-        fromMe: !!msg.key.fromMe,
-        filename: docInfo.filename,
-        allowedGroups: FUNVASOS_GROUP_JIDS
-    });
-
-    if (isGroup && !FUNVASOS_GROUP_JIDS.includes(chatJid)) {
-        console.log(`[FUNVASOS-WA] Grupo ${chatJid} no está en FUNVASOS_GROUP_JIDS (${FUNVASOS_GROUP_JIDS.join(',')}), omitiendo.`);
-        return false;
+    if (isGroup) {
+        const allowed = await isAuthorizedFunVasosGroup(chatJid);
+        const subj = (groupSubjectCache.get(chatJid)?.subject || '');
+        console.log('[FUNVASOS-WA] Documento Excel detectado en grupo:', {
+            chatJid,
+            subject: subj,
+            allowed,
+            fromMe: !!msg.key.fromMe,
+            filename: docInfo.filename
+        });
+        if (!allowed) {
+            console.log(`[FUNVASOS-WA] Grupo "${subj}" (${chatJid}) no autorizado para FunVasos, omitiendo.`);
+            return false;
+        }
+    } else {
+        if (!FUNVASOS_ALLOW_DM) return false;
+        console.log('[FUNVASOS-WA] Documento Excel detectado en chat privado:', {
+            chatJid,
+            fromMe: !!msg.key.fromMe,
+            filename: docInfo.filename
+        });
     }
-    if (!isGroup && !FUNVASOS_ALLOW_DM) return false;
 
     const senderJid = msg.key.participant || chatJid;
     const senderName = msg.pushName || senderJid.split('@')[0];
